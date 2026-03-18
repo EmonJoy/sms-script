@@ -1763,3 +1763,30 @@ if __name__ == '__main__':
         log_activity(f"Server error: {e}")
         server_shutdown()
         sys.exit(1)
+
+
+# ==================== FLASK SERVER FOR RENDER PORT BINDING ====================
+from flask import Flask
+import threading
+import os
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "🔥 SMS BOMBER BOT is running on Render!"
+
+@app.route('/health')
+def health():
+    return "OK", 200
+
+def run_flask():
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port, debug=False)
+
+# Flask থ্রেড শুরু করুন (daemon=True যাতে main thread শেষ হলে এটাও শেষ হয়)
+flask_thread = threading.Thread(target=run_flask, daemon=True)
+flask_thread.start()
+
+# ==================== YOUR EXISTING BOT CODE ====================
+# আপনার বাকি সব কোড (ফাংশন, handlers, main ইত্যাদি) এর পর...
