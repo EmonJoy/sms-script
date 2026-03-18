@@ -16,9 +16,9 @@ import warnings
 warnings.filterwarnings("ignore", category=requests.packages.urllib3.exceptions.InsecureRequestWarning)
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-# ==================== FLASK SERVER FOR RENDER PORT BINDING ====================
+
+# ==================== FLASK APP (ONLY DECLARATION, NO THREAD) ====================
 from flask import Flask
-import threading
 import os
 
 app = Flask(__name__)
@@ -30,15 +30,7 @@ def home():
 @app.route('/health')
 def health():
     return "OK", 200
-
-def run_flask():
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=False)
-
-
-flask_thread = threading.Thread(target=run_flask, daemon=True)
-flask_thread.start()
-
+# =================================================================================
 
 # Bot configuration
 BOT_TOKEN = "8781609298:AAG6GxsYKPdFZkkyFYxaDhOBFeHO7PcnRls"
@@ -1786,5 +1778,3 @@ if __name__ == '__main__':
         log_activity(f"Server error: {e}")
         server_shutdown()
         sys.exit(1)
-
-
