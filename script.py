@@ -22,304 +22,114 @@ BOT_TOKEN = "8781609298:AAG6GxsYKPdFZkkyFYxaDhOBFeHO7PcnRls"
 # ============================================================
 
 # ==================== FLASK ADMIN DASHBOARD ====================
-from flask import Flask, jsonify, request, render_template_string, redirect, url_for
-import hashlib
+# ==================== SIMPLE FLASK ADMIN (WORKING) ====================
+from flask import Flask, jsonify, render_template_string
 import threading
 import os
-import sys
-from datetime import datetime  # <-- IMPORTANT: Added this import!
-
-# Dummy log function for Flask (will be replaced later)
-def flask_log(msg):
-    print(f"[FLASK] {msg}")
+from datetime import datetime
 
 app = Flask(__name__)
 
-# Admin configuration
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "A3braham77"
-MAINTENANCE_MESSAGE = "🔧 Server is under maintenance - EMON JOY"
-
-# Database files
-BANNED_USERS_FILE = "banned_users.json"
-USER_HISTORY_FILE = "user_history.json"
-USER_LIMITS_FILE = "user_limits.json"
-
-# Global variables (shared with bot)
-active_attacks = {}
-bot_users = {}
-bot_stats = {
-    'total_users': 0,
-    'total_attacks': 0,
-    'total_messages': 0,
-    'start_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    'server_status': 'ONLINE'
-}
-
-banned_users = []
-user_limits = {}
-user_history = {}
-admin_sessions = {}
-
-def load_json_file(filename, default):
-    try:
-        if os.path.exists(filename):
-            with open(filename, 'r') as f:
-                return json.load(f)
-    except:
-        pass
-    return default
-
-def save_json_file(filename, data):
-    try:
-        with open(filename, 'w') as f:
-            json.dump(data, f, indent=2)
-    except Exception as e:
-        print(f"Error saving {filename}: {e}")
-
-# Load data
-banned_users = load_json_file(BANNED_USERS_FILE, [])
-user_limits = load_json_file(USER_LIMITS_FILE, {})
-user_history = load_json_file(USER_HISTORY_FILE, {})
-
-def is_banned(user_id):
-    return str(user_id) in banned_users
-
-def get_user_limit(user_id):
-    return user_limits.get(str(user_id), {'daily': 3, 'total': 100})
-
-def update_user_history(user_id, target_number):
-    uid = str(user_id)
-    if uid not in user_history:
-        user_history[uid] = []
-    
-    user_history[uid].append({
-        'target': target_number,
-        'time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        'success': 0,
-        'failed': 0
-    })
-    
-    if len(user_history[uid]) > 50:
-        user_history[uid] = user_history[uid][-50:]
-    
-    save_json_file(USER_HISTORY_FILE, user_history)
-
-# HTML Templates
-LOGIN_HTML = '''
+# Simple HTML template (no complex JavaScript)
+HTML = '''
 <!DOCTYPE html>
 <html>
-<head><title>Admin Login</title>
-<style>body{font-family:Arial;background:#f0f0f0}.login-box{max-width:400px;margin:100px auto;background:white;padding:30px;border-radius:10px;box-shadow:0 0 20px rgba(0,0,0,0.1)}.login-box h2{text-align:center;color:#333}.login-box input{width:100%;padding:10px;margin:10px 0;border:1px solid #ddd;border-radius:5px}.login-box button{width:100%;padding:10px;background:#667eea;color:white;border:none;border-radius:5px;cursor:pointer}.error{color:red;text-align:center}</style></head>
-<body><div class="login-box"><h2>Admin Login</h2>
-<form method="POST" action="/login"><input type="text" name="username" placeholder="Username" required><input type="password" name="password" placeholder="Password" required><button type="submit">Login</button></form></div></body></html>
+<head>
+    <title>SMS Bomber Admin</title>
+    <style>
+        body{font-family:Arial;margin:20px;background:#f0f0f0}
+        .container{max-width:800px;margin:auto;background:white;padding:20px;border-radius:10px}
+        .header{background:#667eea;color:white;padding:20px;border-radius:5px}
+        .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;margin:20px 0}
+        .card{background:white;padding:20px;border-radius:5px;box-shadow:0 2px 5px rgba(0,0,0,0.1)}
+        .number{font-size:36px;font-weight:bold;color:#667eea}
+        table{width:100%;border-collapse:collapse}
+        th{background:#667eea;color:white;padding:10px}
+        td{padding:10px;border-bottom:1px solid #ddd}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔥 SMS BOMBER ADMIN</h1>
+            <p>Server Status: <strong id="status">ONLINE</strong></p>
+        </div>
+        
+        <div class="stats">
+            <div class="card">
+                <h3>Total Users</h3>
+                <div class="number" id="totalUsers">0</div>
+            </div>
+            <div class="card">
+                <h3>Total Attacks</h3>
+                <div class="number" id="totalAttacks">0</div>
+            </div>
+        </div>
+        
+        <h3>Active Users</h3>
+        <table id="userTable">
+            <tr><th>ID</th><th>Username</th><th>Name</th><th>Attacks</th></tr>
+        </table>
+    </div>
+    
+    <script>
+    function loadStats() {
+        fetch('/api/stats')
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('totalUsers').innerText = data.total_users;
+                document.getElementById('totalAttacks').innerText = data.total_attacks;
+            });
+    }
+    
+    function loadUsers() {
+        fetch('/api/users')
+            .then(r => r.json())
+            .then(users => {
+                let html = '<tr><th>ID</th><th>Username</th><th>Name</th><th>Attacks</th></tr>';
+                users.forEach(user => {
+                    html += `<tr>
+                        <td>${user.id}</td>
+                        <td>@${user.username || 'None'}</td>
+                        <td>${user.name}</td>
+                        <td>${user.attacks}</td>
+                    </tr>`;
+                });
+                document.getElementById('userTable').innerHTML = html;
+            });
+    }
+    
+    loadStats();
+    loadUsers();
+    setInterval(loadStats, 5000);
+    </script>
+</body>
+</html>
 '''
 
-DASHBOARD_HTML = '''
-<!DOCTYPE html>
-<html>
-<head><title>Admin Dashboard</title>
-<style>
-body{font-family:Arial;margin:20px;background:#f0f0f0}.container{max-width:1400px;margin:auto;background:white;padding:20px;border-radius:10px}
-.header{background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);color:white;padding:20px;border-radius:5px}
-.nav{background:#333;padding:10px;border-radius:5px;margin:20px 0}.nav a{color:white;padding:10px 20px;text-decoration:none;display:inline-block}.nav a:hover{background:#555}
-.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px;margin:20px 0}
-.stat-card{background:white;padding:20px;border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,0.1);text-align:center}
-.stat-card h3{margin:0;color:#666;font-size:14px}.stat-card .number{font-size:32px;font-weight:bold;color:#667eea}
-.server-status{padding:10px;border-radius:5px;font-weight:bold}
-.status-online{background:#d4edda;color:#155724}.status-offline{background:#f8d7da;color:#721c24}
-.user-table{width:100%;border-collapse:collapse;margin-top:20px}
-.user-table th{background:#667eea;color:white;padding:10px}
-.user-table td{padding:10px;border-bottom:1px solid #ddd}
-.user-table tr:hover{background:#f5f5f5}
-.btn{padding:5px 10px;border:none;border-radius:3px;cursor:pointer;margin:2px}
-.btn-success{background:#28a745;color:white}.btn-danger{background:#dc3545;color:white}
-.btn-warning{background:#ffc107}.btn-info{background:#17a2b8;color:white}
-.broadcast-box{background:#e9ecef;padding:20px;border-radius:5px;margin:20px 0}
-input,textarea,select{width:100%;padding:10px;margin:5px 0;border:1px solid #ddd;border-radius:5px}
-.history-box{max-height:400px;overflow-y:auto;border:1px solid #ddd;padding:10px}
-.badge{padding:3px 8px;border-radius:3px;font-size:12px}
-.badge-danger{background:#dc3545;color:white}.badge-success{background:#28a745;color:white}
-.tab{overflow:hidden;border:1px solid #ccc;background-color:#f1f1f1}
-.tab button{background-color:inherit;float:left;border:none;outline:none;cursor:pointer;padding:14px 16px;transition:0.3s}
-.tab button:hover{background-color:#ddd}.tab button.active{background-color:#667eea;color:white}
-.tabcontent{display:none;padding:20px;border:1px solid #ccc;border-top:none}
-</style></head>
-<body><div class="container">
-<div class="header"><h1>🔥 SMS BOMBER ADMIN PANEL</h1><p>Developed by EMON JOY (Mr.MorningStar)</p>
-<div class="server-status %s" id="serverStatus">Server Status: <strong>%s</strong></div></div>
-<div class="nav"><a href="#" onclick="openTab(event,'Dashboard')">Dashboard</a><a href="#" onclick="openTab(event,'Users')">Users</a><a href="#" onclick="openTab(event,'History')">History</a><a href="#" onclick="openTab(event,'Broadcast')">Broadcast</a><a href="#" onclick="openTab(event,'Controls')">Controls</a><a href="/logout">Logout</a></div>
-<div id="Dashboard" class="tabcontent"><div class="stats-grid"><div class="stat-card"><h3>Total Users</h3><div class="number" id="totalUsers">0</div></div><div class="stat-card"><h3>Total Attacks</h3><div class="number" id="totalAttacks">0</div></div><div class="stat-card"><h3>Active Now</h3><div class="number" id="activeNow">0</div></div><div class="stat-card"><h3>Banned Users</h3><div class="number" id="bannedUsers">0</div></div></div><div id="statsDetails">Loading...</div></div>
-<div id="Users" class="tabcontent"><h3>User Management</h3><input type="text" id="userSearch" placeholder="Search users..." onkeyup="searchUsers()"><div id="usersList">Loading...</div></div>
-<div id="History" class="tabcontent"><h3>Attack History</h3><div id="historyList">Loading...</div></div>
-<div id="Broadcast" class="tabcontent"><h3>Send Broadcast</h3><textarea id="broadcastMsg" rows="4" placeholder="Type your message here..."></textarea><button class="btn btn-success" onclick="sendBroadcast()">Send to All Users</button><div id="broadcastResult"></div></div>
-<div id="Controls" class="tabcontent"><h3>Server Controls</h3><button class="btn btn-success" onclick="serverOn()">Turn ON</button><button class="btn btn-danger" onclick="serverOff()">Turn OFF</button><button class="btn btn-warning" onclick="forceStopAll()">Force Stop All</button><button class="btn btn-info" onclick="restartServer()">Restart Server</button><div id="controlResult"></div></div></div>
-<script>
-function openTab(evt,tabName){var i,tabcontent=document.getElementsByClassName("tabcontent"),tablinks=document.getElementsByClassName("tablinks");for(i=0;i<tabcontent.length;i++)tabcontent[i].style.display="none";for(i=0;i<tablinks.length;i++)tablinks[i].className=tablinks[i].className.replace(" active","");document.getElementById(tabName).style.display="block";evt.currentTarget.className+=" active";if(tabName=='Dashboard')loadDashboard();if(tabName=='Users')loadUsers();if(tabName=='History')loadHistory();}
-function loadDashboard(){fetch('/api/stats').then(r=>r.json()).then(data=>{document.getElementById('totalUsers').innerText=data.total_users;document.getElementById('totalAttacks').innerText=data.total_attacks;document.getElementById('activeNow').innerText=data.active_attacks;document.getElementById('bannedUsers').innerText=data.banned_users;let html='<table class="user-table"><tr><th>Metric</th><th>Value</th></tr><tr><td>Server Status</td><td>'+data.server_status+'</td></tr><tr><td>Uptime</td><td>'+data.uptime+'</td></tr><tr><td>Start Time</td><td>'+data.start_time+'</td></tr></table>';document.getElementById('statsDetails').innerHTML=html;});}
-function loadUsers(){fetch('/api/users').then(r=>r.json()).then(users=>{let html='<table class="user-table"><tr><th>ID</th><th>Username</th><th>Name</th><th>Attacks</th><th>Status</th><th>Actions</th></tr>';users.forEach(user=>{html+='<tr><td>'+user.id+'</td><td>@'+(user.username||'None')+'</td><td>'+user.name+'</td><td>'+user.attacks+'</td><td>'+(user.banned?'<span class="badge badge-danger">Banned</span>':'<span class="badge badge-success">Active</span>')+'</td><td><button class="btn btn-info" onclick="viewHistory('+user.id+')">History</button>'+(user.banned?'<button class="btn btn-success" onclick="unbanUser('+user.id+')">Unban</button>':'<button class="btn btn-danger" onclick="banUser('+user.id+')">Ban</button>')+'<button class="btn btn-warning" onclick="setLimit('+user.id+')">Set Limit</button></td></tr>';});html+='</table>';document.getElementById('usersList').innerHTML=html;});}
-function loadHistory(){fetch('/api/history').then(r=>r.json()).then(history=>{let html='<div class="history-box">';history.forEach(item=>{html+='<div style="border-bottom:1px solid #ddd;padding:10px;"><strong>User:</strong> '+item.user+'<br><strong>Target:</strong> '+item.target+'<br><strong>Time:</strong> '+item.time+'</div>';});html+='</div>';document.getElementById('historyList').innerHTML=html;});}
-function searchUsers(){let input=document.getElementById('userSearch').value.toUpperCase(),table=document.querySelector('.user-table');if(!table)return;let tr=table.getElementsByTagName('tr');for(let i=1;i<tr.length;i++){let match=false,td=tr[i].getElementsByTagName('td');for(let j=0;j<td.length;j++){if(td[j]&&td[j].innerHTML.toUpperCase().indexOf(input)>-1){match=true;break;}}tr[i].style.display=match?'':'none';}}
-function banUser(userId){fetch('/api/ban',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId})}).then(()=>loadUsers());}
-function unbanUser(userId){fetch('/api/unban',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId})}).then(()=>loadUsers());}
-function setLimit(userId){let limit=prompt("Enter daily attack limit (1-100):","3");if(limit){fetch('/api/set_limit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:userId,limit:parseInt(limit)})}).then(()=>loadUsers());}}
-function viewHistory(userId){fetch('/api/user_history/'+userId).then(r=>r.json()).then(history=>{let html='<div class="history-box"><h4>User History</h4>';history.forEach(item=>{html+='<div>'+item.time+' - '+item.target+'</div>';});html+='</div>';let win=window.open("","History","width=600,height=400");win.document.body.innerHTML=html;});}
-function sendBroadcast(){let msg=document.getElementById('broadcastMsg').value;if(!msg)return alert('Enter message');fetch('/api/broadcast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})}).then(r=>r.json()).then(data=>{document.getElementById('broadcastResult').innerHTML='<p style="color:green;">✓ Sent to '+data.count+' users</p>';});}
-function serverOn(){fetch('/api/server_on',{method:'POST'}).then(()=>{alert('Server turned ON');location.reload();});}
-function serverOff(){fetch('/api/server_off',{method:'POST'}).then(()=>{alert('Server turned OFF - Maintenance mode');location.reload();});}
-function forceStopAll(){if(confirm('Stop all attacks?')){fetch('/api/force_stop_all',{method:'POST'}).then(()=>{alert('All attacks stopped');loadDashboard();});}}
-function restartServer(){if(confirm('Restart server?')){fetch('/api/restart',{method:'POST'});}}
-document.querySelector('.tablinks').click();setInterval(loadDashboard,5000);
-</script></body></html>
-'''
-
-# Flask routes
 @app.route('/')
 def index():
-    session_id = request.cookies.get('session_id')
-    if session_id and session_id in admin_sessions:
-        status_class = 'status-online' if bot_stats['server_status'] == 'ONLINE' else 'status-offline'
-        return render_template_string(DASHBOARD_HTML % (status_class, bot_stats['server_status']))
-    return render_template_string(LOGIN_HTML)
-
-@app.route('/login', methods=['POST'])
-def login():
-    username = request.form.get('username')
-    password = request.form.get('password')
-    if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-        session_id = hashlib.md5(f"{username}{datetime.now()}".encode()).hexdigest()
-        admin_sessions[session_id] = datetime.now()
-        response = app.make_response(redirect(url_for('index')))
-        response.set_cookie('session_id', session_id)
-        return response
-    return render_template_string(LOGIN_HTML.replace('</form>', '<p class="error">Invalid credentials</p></form>'))
-
-@app.route('/logout')
-def logout():
-    session_id = request.cookies.get('session_id')
-    if session_id in admin_sessions:
-        del admin_sessions[session_id]
-    return redirect(url_for('index'))
+    return render_template_string(HTML)
 
 @app.route('/api/stats')
 def api_stats():
-    uptime = datetime.now() - datetime.strptime(bot_stats['start_time'], "%Y-%m-%d %H:%M:%S")
-    hours = uptime.total_seconds() // 3600
-    minutes = (uptime.total_seconds() % 3600) // 60
     return jsonify({
-        'total_users': bot_stats['total_users'],
-        'total_attacks': bot_stats['total_attacks'],
-        'active_attacks': len(active_attacks),
-        'banned_users': len(banned_users),
-        'server_status': bot_stats['server_status'],
-        'uptime': f"{int(hours)}h {int(minutes)}m",
-        'start_time': bot_stats['start_time']
+        'total_users': len(bot_users),
+        'total_attacks': bot_stats.get('total_attacks', 0),
+        'server_status': 'ONLINE'
     })
 
 @app.route('/api/users')
 def api_users():
-    user_list = []
-    for uid, data in list(bot_users.items())[:100]:
-        user_list.append({
+    users = []
+    for uid, data in list(bot_users.items())[:20]:
+        users.append({
             'id': uid,
             'username': data.get('username', ''),
             'name': data.get('first_name', 'Unknown'),
-            'attacks': data.get('total_attacks', 0),
-            'banned': str(uid) in banned_users
+            'attacks': data.get('total_attacks', 0)
         })
-    return jsonify(user_list)
-
-@app.route('/api/history')
-def api_history():
-    history_list = []
-    for uid, records in list(user_history.items())[:50]:
-        for record in records[-5:]:
-            history_list.append({
-                'user': uid,
-                'target': record.get('target', 'Unknown'),
-                'time': record.get('time', 'Unknown')
-            })
-    return jsonify(history_list)
-
-@app.route('/api/user_history/<user_id>')
-def api_user_history(user_id):
-    return jsonify(user_history.get(user_id, [])[-20:])
-
-@app.route('/api/ban', methods=['POST'])
-def api_ban():
-    data = request.json
-    user_id = str(data.get('user_id'))
-    if user_id not in banned_users:
-        banned_users.append(user_id)
-        save_json_file(BANNED_USERS_FILE, banned_users)
-        if int(user_id) in active_attacks:
-            active_attacks[int(user_id)]['stop'] = True
-    return jsonify({'success': True})
-
-@app.route('/api/unban', methods=['POST'])
-def api_unban():
-    data = request.json
-    user_id = str(data.get('user_id'))
-    if user_id in banned_users:
-        banned_users.remove(user_id)
-        save_json_file(BANNED_USERS_FILE, banned_users)
-    return jsonify({'success': True})
-
-@app.route('/api/set_limit', methods=['POST'])
-def api_set_limit():
-    data = request.json
-    user_id = str(data.get('user_id'))
-    limit = data.get('limit', 3)
-    user_limits[user_id] = {'daily': limit, 'total': 999}
-    save_json_file(USER_LIMITS_FILE, user_limits)
-    return jsonify({'success': True})
-
-@app.route('/api/broadcast', methods=['POST'])
-def api_broadcast():
-    data = request.json
-    message = data.get('message', '')
-    def broadcast_worker():
-        count = 0
-        for uid in bot_users:
-            try:
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': int(uid),
-                    'text': f"📢 **ADMIN BROADCAST**\n\n{message}",
-                    'parse_mode': 'Markdown'
-                })
-                count += 1
-                time.sleep(0.05)
-            except:
-                pass
-        flask_log(f"Admin broadcast sent to {count} users")
-    threading.Thread(target=broadcast_worker, daemon=True).start()
-    return jsonify({'success': True, 'count': len(bot_users)})
-
-@app.route('/api/force_stop_all', methods=['POST'])
-def api_force_stop_all():
-    for aid in list(active_attacks.keys()):
-        active_attacks[aid]['stop'] = True
-    flask_log("Admin force stopped all attacks")
-    return jsonify({'success': True})
-
-@app.route('/api/server_on', methods=['POST'])
-def api_server_on():
-    bot_stats['server_status'] = 'ONLINE'
-    flask_log("Admin turned server ON")
-    return jsonify({'success': True})
-
-@app.route('/api/server_off', methods=['POST'])
-def api_server_off():
-    bot_stats['server_status'] = 'OFFLINE'
-    for aid in list(active_attacks.keys()):
-        active_attacks[aid]['stop'] = True
-    flask_log("Admin turned server OFF (maintenance mode)")
-    return jsonify({'success': True})
-
-@app.route('/api/restart', methods=['POST'])
-def api_restart():
-    threading.Thread(target=lambda: os.execl(sys.executable, sys.executable, *sys.argv), daemon=True).start()
-    return jsonify({'success': True})
+    return jsonify(users)
 
 @app.route('/health')
 def health():
@@ -329,12 +139,11 @@ def run_flask():
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
+# Start Flask in thread
 flask_thread = threading.Thread(target=run_flask, daemon=True)
 flask_thread.start()
-
-print("✅ Flask Admin Dashboard started")
-print("🔐 Login: admin / A3braham77")
-print("="*60)
+print("✅ Flask Admin started")
+# ==================== END FLASK ====================
 # ==================== END FLASK ====================
 
 # Bot configuration (already defined above)
