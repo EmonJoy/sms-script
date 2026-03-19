@@ -33,7 +33,7 @@ def health():
 # =================================================================================
 
 # Bot configuration
-BOT_TOKEN = "8781609298:AAG82Tkv9TNn_gKynuCAwt57J2Zb99-ZJYY"
+BOT_TOKEN = "8781609298:AAHQmiYoaRtFXvdj5W20-jPpd1NBdc99MGE"
 
 # File paths for data storage
 USERS_FILE = "bot_users.json"
