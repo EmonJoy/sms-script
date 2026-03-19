@@ -18,19 +18,37 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==================== BOT TOKEN (FIRST) ====================
-BOT_TOKEN = "8781609298:AAG6GxsYKPdFZkkyFYxaDhOBFeHO7PcnRls"
+BOT_TOKEN = "8781609298:AAG82Tkv9TNn_gKynuCAwt57J2Zb99-ZJYY"
 # ============================================================
 
 # ==================== FLASK ADMIN DASHBOARD ====================
-# ==================== SIMPLE FLASK ADMIN (WORKING) ====================
+# ==================== FIXED FLASK ADMIN ====================
 from flask import Flask, jsonify, render_template_string
 import threading
 import os
+import sys
 from datetime import datetime
 
+# Flask app
 app = Flask(__name__)
 
-# Simple HTML template (no complex JavaScript)
+# Global variables (ensure these exist before Flask uses them)
+if 'bot_stats' not in globals():
+    bot_stats = {
+        'total_users': 0,
+        'total_attacks': 0,
+        'total_messages': 0,
+        'start_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        'server_status': 'ONLINE'
+    }
+
+if 'bot_users' not in globals():
+    bot_users = {}
+
+if 'active_attacks' not in globals():
+    active_attacks = {}
+
+# Simple HTML template
 HTML = '''
 <!DOCTYPE html>
 <html>
@@ -64,25 +82,34 @@ HTML = '''
                 <h3>Total Attacks</h3>
                 <div class="number" id="totalAttacks">0</div>
             </div>
+            <div class="card">
+                <h3>Active Now</h3>
+                <div class="number" id="activeNow">0</div>
+            </div>
+            <div class="card">
+                <h3>Uptime</h3>
+                <div class="number" id="uptime">0h</div>
+            </div>
         </div>
         
-        <h3>Active Users</h3>
+        <h3>Recent Users</h3>
         <table id="userTable">
             <tr><th>ID</th><th>Username</th><th>Name</th><th>Attacks</th></tr>
         </table>
     </div>
     
     <script>
-    function loadStats() {
+    function loadData() {
         fetch('/api/stats')
             .then(r => r.json())
             .then(data => {
                 document.getElementById('totalUsers').innerText = data.total_users;
                 document.getElementById('totalAttacks').innerText = data.total_attacks;
+                document.getElementById('activeNow').innerText = data.active_attacks;
+                document.getElementById('uptime').innerText = data.uptime;
+                document.getElementById('status').innerText = data.server_status;
             });
-    }
-    
-    function loadUsers() {
+        
         fetch('/api/users')
             .then(r => r.json())
             .then(users => {
@@ -99,9 +126,8 @@ HTML = '''
             });
     }
     
-    loadStats();
-    loadUsers();
-    setInterval(loadStats, 5000);
+    loadData();
+    setInterval(loadData, 5000);
     </script>
 </body>
 </html>
@@ -113,10 +139,17 @@ def index():
 
 @app.route('/api/stats')
 def api_stats():
+    from datetime import datetime
+    uptime = datetime.now() - datetime.strptime(bot_stats['start_time'], "%Y-%m-%d %H:%M:%S")
+    hours = uptime.total_seconds() // 3600
+    minutes = (uptime.total_seconds() % 3600) // 60
+    
     return jsonify({
         'total_users': len(bot_users),
         'total_attacks': bot_stats.get('total_attacks', 0),
-        'server_status': 'ONLINE'
+        'active_attacks': len(active_attacks),
+        'server_status': bot_stats.get('server_status', 'ONLINE'),
+        'uptime': f"{int(hours)}h {int(minutes)}m"
     })
 
 @app.route('/api/users')
@@ -135,14 +168,22 @@ def api_users():
 def health():
     return "OK", 200
 
+# Fix port conflict - try different ports
 def run_flask():
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    ports = [10000, 8080, 5000, 8000]
+    for port in ports:
+        try:
+            print(f"Trying port {port}...")
+            app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+            break
+        except OSError:
+            print(f"Port {port} in use, trying next...")
+            continue
 
 # Start Flask in thread
 flask_thread = threading.Thread(target=run_flask, daemon=True)
 flask_thread.start()
-print("✅ Flask Admin started")
+print("✅ Flask Admin started (trying ports 10000,8080,5000,8000)")
 # ==================== END FLASK ====================
 # ==================== END FLASK ====================
 
