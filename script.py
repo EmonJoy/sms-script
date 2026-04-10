@@ -36,7 +36,7 @@ def health():
 # test bot token = 8504073239:AAGvQDozBNWc0q_5MJnElGIU-6mUevcuz6w
 
 # main bot token = 8781609298:AAGiER83svBPGA8WnY9LXVmQYS6bEEshAOE
-BOT_TOKEN = "8781609298:AAGiER83svBPGA8WnY9LXVmQYS6bEEshAOE"
+BOT_TOKEN = "8781609298:AAGSNBb6geKfv5zWKzBCdSnGuZ5C2c8gSKo"
 ADMIN_PASS = "A3braham77"
 
 # File paths for data storage
