@@ -33,8 +33,8 @@ def health():
 # =================================================================================
 
 # Bot configuration
-BOT_TOKEN = "8781609298:AAFU97Zwssf1IUHZJkV5xYlEyPtc-pF2hLM"
-ADMIN_PASS = "A3braham77"
+BOT_TOKEN = "8781609298:AAFtzZb3M4rdoUnnmmdCxFJvjSpyFezMFzc"
+ADMIN_PASS = "A3braham"
 
 # File paths for data storage
 USERS_FILE = "bot_users.json"
@@ -1439,7 +1439,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += f"/revoke <user_id> <amount> - Remove tokens\n"
     else:
         msg += f"\n🔑 **Admin Login:**\n"
-        msg += f"/admin {ADMIN_PASS} - Login as admin\n"
+        msg += f"/admin {XXXXXXXX} - Login as admin\n"
     
     msg += f"\n💡 **Token Rules:**\n"
     msg += f"- You get 3 one-time free uses (never resets)\n"
