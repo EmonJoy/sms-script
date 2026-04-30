@@ -1439,7 +1439,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += f"/revoke <user_id> <amount> - Remove tokens\n"
     else:
         msg += f"\n🔑 **Admin Login:**\n"
-        msg += f"/admin {XXXXXXXX} - Login as admin\n"
+       
     
     msg += f"\n💡 **Token Rules:**\n"
     msg += f"- You get 3 one-time free uses (never resets)\n"
